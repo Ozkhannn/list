@@ -2,7 +2,7 @@ name: Günlük IPTV Güncelleme (favoritv Gist)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # Her gün 03:00 UTC
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -62,10 +62,16 @@ jobs:
           # filter.txt oku (repo kökünde)
           try:
               with open("filter.txt", "r", encoding="utf-8") as f:
-                  favorite_channels = [line.strip().lower() for line in f if line.strip()]
+                  favorite_channels = [line.strip() for line in f if line.strip()]
           except Exception as e:
               print(f"❌ filter.txt okunamadı: {e}")
               favorite_channels = []
+
+          # normalize fonksiyonu: küçük harf, sadece harf ve rakam
+          def normalize(s):
+              return re.sub(r'[^a-z0-9]', '', s.lower())
+
+          normalized_channels = [normalize(name) for name in favorite_channels]
 
           combined = "#EXTM3U\n"
 
@@ -107,21 +113,27 @@ jobs:
                           continue
 
                       if cl.startswith("#EXTINF"):
-                          match = take_all or any(name in cl.lower() for name in favorite_channels)
+                          # normalize EXTINF satırı
+                          cl_norm = normalize(cl)
+                          match = take_all or any(name in cl_norm for name in normalized_channels)
+
                           if match:
+                              # Mevcut kategori etiketlerini temizle
+                              cl = re.sub(r'group-title="[^"]*"', '', cl)  # group-title sil
+                              cl = re.sub(r'tvg-group="[^"]*"', '', cl)    # eski tvg-group sil
+
+                              # Kategori varsa ekle
                               if category:
-                                  if 'tvg-group="' in cl:
-                                      cl = re.sub(r'tvg-group="[^"]*"', f'tvg-group="{category}"', cl)
-                                  else:
-                                      cl = cl.replace("#EXTINF:", f'#EXTINF: tvg-group="{category}" ', 1)
+                                  cl = cl.replace("#EXTINF:", f'#EXTINF: tvg-group="{category}" ', 1)
+
                               combined += cl + "\n"
 
-                              # bir sonraki satır URL olduğu için ekle
+                              # Bir sonraki satır URL olduğu için ekle
                               if i + 1 < len(content_lines):
                                   url_line = content_lines[i + 1].strip()
                                   if url_line and not url_line.startswith("#"):
                                       combined += url_line + "\n"
-                          i += 2  # EXTINF ve URL satırını atlattık
+                          i += 2
                           continue
                       else:
                           i += 1
