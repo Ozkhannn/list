@@ -2,7 +2,7 @@ name: Günlük IPTV Güncelleme (favoritv Gist)
 
 on:
   schedule:
-    - cron: "0 3 * * *"  # Her gün 03:00 UTC
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -59,20 +59,23 @@ jobs:
           for link in all_links:
               vod = False
               category = None
-              actual_link = link
+              actual_link = link.strip()
 
-              # vod ve kategori ayrıştırması
-              parts = link.split(":", 2)
-              if parts[0] == "vod":
+              # vod ve kategori ayrıştırması (düzeltildi)
+              if actual_link.startswith("vod:"):
                   vod = True
-                  if len(parts) == 3:
-                      category = parts[1]
-                      actual_link = parts[2]
+                  rest = actual_link[4:]
+                  if ':' in rest:
+                      category, actual_link = rest.split(':', 1)
                   else:
-                      actual_link = parts[1]
-              elif len(parts) == 2:
-                  category = parts[0]
-                  actual_link = parts[1]
+                      actual_link = rest
+              elif ':' in actual_link:
+                  category, actual_link = actual_link.split(':', 1)
+
+              actual_link = actual_link.strip()
+              if not actual_link.startswith("http"):
+                  print(f"⚠️ Geçersiz URL atlandı: {actual_link}")
+                  continue
 
               try:
                   r = requests.get(actual_link, timeout=20)
