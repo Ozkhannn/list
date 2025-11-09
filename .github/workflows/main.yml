@@ -18,6 +18,10 @@ jobs:
         with:
           python-version: 3.x
 
+      - name: Gerekli paketleri kur
+        run: |
+          pip install requests
+
       - name: Favori listesi güncelle
         env:
           GIST_ID_LINKS: ${{ secrets.GIST_ID_LINKS }}
