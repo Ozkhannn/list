@@ -1,3 +1,8 @@
 sinema
-cnn turk
-sinema
+cnn
+bein
+film
+movie
+eno
+dmax
+tlc
