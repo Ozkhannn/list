@@ -2,7 +2,7 @@ name: Günlük IPTV Güncelleme (favoritv Gist)
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "0 3 * * *"  # Her gün saat 03:00
   workflow_dispatch:
 
 jobs:
@@ -75,12 +75,12 @@ jobs:
               dn = display_name.lower()
               for f in filter_list:
                   word = f.lower()
-                  # kelime içinde değil, ayrı kelime olarak
+                  # Kelime içinde eşleşme
                   if re.search(rf'\b{re.escape(word)}\b', dn):
                       return True
               return False
 
-          for link in all_links:
+          for idx, link in enumerate(all_links):
               parts = [p for p in link.split('#') if p]
               category, take_all, actual_link = None, False, None
 
@@ -104,14 +104,22 @@ jobs:
                       continue
 
                   lines = r.text.splitlines()
+
+                  # İlk link için EPG satırını yakala (büyük/küçük harf duyarsız)
+                  if idx == 0 and epg_line is None:
+                      for L in lines:
+                          s = L.strip()
+                          if s.upper().startswith("#EXTM3U"):
+                              epg_line = s
+                              break
+
                   for i, line in enumerate(lines):
                       line = line.strip()
                       if not line:
                           continue
 
-                      # EPG satırı koru
-                      if line.startswith("#EXTM3U") and "url-tvg" in line:
-                          epg_line = line
+                      # Diğer linklerdeki #EXTM3U satırlarını atla
+                      if line.upper().startswith("#EXTM3U"):
                           continue
 
                       if line.startswith("#EXTINF"):
@@ -140,11 +148,8 @@ jobs:
               except Exception as e:
                   print(f"⚠️ {actual_link} indirilemedi: {e}")
 
-          # EPG varsa başa ekle
-          final_output = "#EXTM3U\n"
-          if epg_line:
-              final_output += epg_line + "\n"
-          final_output += combined
+          # Final: epg_line varsa başa koy, yoksa varsayılan
+          final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + combined
 
           # Gist güncelle
           update_payload = {"files": {"favoritv": {"content": final_output}}}
