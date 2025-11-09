@@ -21,7 +21,7 @@ jobs:
       - name: IPTV Listesini Güncelle (favoritv)
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}   # Artık token kullanılıyor
         run: |
           python - <<'PYCODE'
           import os, requests
