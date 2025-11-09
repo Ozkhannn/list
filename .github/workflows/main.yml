@@ -1,110 +1,157 @@
-name: Update IPTV List
+name: Günlük IPTV Güncelleme (favoritv Gist)
 
 on:
   schedule:
-    - cron: "0 3 * * *"  # Her gün sabah 03:00
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
-  update-list:
+  update:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Reposu klonla
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Python ortamını ayarla
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.x
+          python-version: '3.x'
 
-      - name: Gerekli paketleri kur
-        run: |
-          pip install requests
+      - name: Install dependencies
+        run: pip install requests
 
-      - name: Favori listesi güncelle
+      - name: Update favoritv list
         env:
-          GIST_ID_LINKS: ${{ secrets.GIST_ID_LINKS }}
-          GIST_ID_OUTPUT: ${{ secrets.GIST_ID_OUTPUT }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           python - <<'PYCODE'
-          import requests, re, os
+          import os, requests, re
 
-          gist_api = "https://api.github.com/gists/"
-          token = os.getenv("GH_TOKEN")
-          headers = {"Authorization": f"token {token}"} if token else {}
+          gist_id = os.environ.get("GIST_ID")
+          github_token = os.environ.get("GITHUB_TOKEN")
 
-          def get_gist_content(gid):
-              r = requests.get(gist_api + gid, headers=headers)
-              r.raise_for_status()
-              return list(r.json()["files"].values())[0]["content"]
-
-          def update_gist(gid, content):
-              r = requests.patch(gist_api + gid, headers=headers, json={"files": {"favoritv": {"content": content}}})
-              r.raise_for_status()
-
-          # Gist ve filtreleri al
-          try:
-              links_raw = get_gist_content(os.getenv("GIST_ID_LINKS"))
-          except Exception as e:
-              print("❌ Link listesi alınamadı:", e)
+          if not gist_id or not github_token:
+              print("❌ GIST_ID veya GITHUB_TOKEN eksik.")
               raise SystemExit(1)
 
-          links = [l.strip() for l in links_raw.splitlines() if l.strip()]
+          headers = {"Authorization": f"token {github_token}"}
+          gist_api = f"https://api.github.com/gists/{gist_id}"
+
+          # Gist'i al
+          resp = requests.get(gist_api, headers=headers)
+          if resp.status_code != 200:
+              print(f"❌ Gist alınamadı: {resp.status_code}")
+              raise SystemExit(1)
+
+          gist_data = resp.json()
+          files = gist_data.get("files", {})
+
+          if "links" not in files:
+              print("❌ 'links' dosyası bulunamadı.")
+              raise SystemExit(1)
+
+          links_content = files["links"]["content"]
+          all_links = [line.strip() for line in links_content.splitlines() if line.strip()]
+          print(f"🔗 {len(all_links)} bağlantı bulundu.")
+
+          # filter.txt oku
           try:
               with open("filter.txt", "r", encoding="utf-8") as f:
-                  filters = [x.strip().lower() for x in f if x.strip()]
-          except:
-              filters = []
+                  favorite_channels = [line.strip() for line in f if line.strip()]
+              print(f"🎯 {len(favorite_channels)} filtre yüklendi.")
+          except Exception as e:
+              print(f"⚠️ filter.txt okunamadı: {e}")
+              favorite_channels = []
 
-          total_channels = 0
-          skipped = 0
+          combined = ""
           epg_line = None
-          combined = []
 
-          print(f"🔄 {len(links)} bağlantı işlenecek...")
+          def extract_display_name(extinf_line):
+              parts = extinf_line.split(',', 1)
+              return parts[1].strip() if len(parts) == 2 else ""
 
-          for i, line in enumerate(links):
-              parts = re.findall(r"#(.*?)#", line)
-              url = re.sub(r"#.*?#", "", line).strip()
-              category = parts[0] if parts else None
-              all_flag = any(p.lower() == "all" for p in parts)
+          def match_channel(display_name, filter_list):
+              dn = display_name.lower()
+              for f in filter_list:
+                  word = f.lower()
+                  # kelime içinde değil, ayrı kelime olarak
+                  if re.search(rf'\b{re.escape(word)}\b', dn):
+                      return True
+              return False
 
-              try:
-                  data = requests.get(url, timeout=20).text
-              except Exception:
-                  skipped += 1
+          for link in all_links:
+              parts = [p for p in link.split('#') if p]
+              category, take_all, actual_link = None, False, None
+
+              if len(parts) == 3:  # kategori#all#URL
+                  category = parts[0]
+                  take_all = parts[1].lower() == "all"
+                  actual_link = parts[2]
+              elif len(parts) == 2:  # kategori#URL
+                  category, actual_link = parts
+              else:
+                  actual_link = link
+
+              if not actual_link.startswith("http"):
+                  print(f"⚠️ Geçersiz URL atlandı: {actual_link}")
                   continue
 
-              if i == 0:
-                  m = re.search(r'(?m)^#EXTM3U[^\n]*', data)
-                  if m:
-                      epg_line = m.group(0)
+              try:
+                  r = requests.get(actual_link, timeout=60)
+                  if r.status_code != 200:
+                      print(f"⚠️ {actual_link} hata: {r.status_code}")
+                      continue
 
-              lines = [l for l in data.splitlines() if not l.strip().startswith("#EXTM3U")]
+                  lines = r.text.splitlines()
+                  for i, line in enumerate(lines):
+                      line = line.strip()
+                      if not line:
+                          continue
 
-              for j in range(len(lines)):
-                  if lines[j].startswith("#EXTINF"):
-                      infoline = lines[j]
-                      url_line = lines[j + 1] if j + 1 < len(lines) else ""
+                      # EPG satırı koru
+                      if line.startswith("#EXTM3U") and "url-tvg" in line:
+                          epg_line = line
+                          continue
 
-                      match = re.search(r",\s*(.*)", infoline)
-                      name = match.group(1).lower() if match else ""
+                      if line.startswith("#EXTINF"):
+                          name = extract_display_name(line)
+                          if not (take_all or match_channel(name, favorite_channels)):
+                              continue
 
-                      if all_flag or any(re.search(rf'\b{re.escape(f)}\b', name, re.IGNORECASE) for f in filters):
-                          infoline = re.sub(r'(group-title|tvg-group)="[^"]*"', '', infoline)
+                          # Mevcut kategori etiketlerini sil
+                          line = re.sub(r'group-title="[^"]*"', '', line)
+                          line = re.sub(r'tvg-group="[^"]*"', '', line)
+
+                          # Yeni kategori ekle
                           if category:
-                              infoline = infoline.replace("#EXTINF", f'#EXTINF:-1 group-title="{category}"')
-                          combined.append(infoline)
-                          combined.append(url_line)
-                          total_channels += 1
+                              line = line.replace("#EXTINF:", f'#EXTINF: group-title="{category}" ', 1)
 
-          output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + "\n".join(combined)
+                          combined += line + "\n"
 
-          try:
-              update_gist(os.getenv("GIST_ID_OUTPUT"), output)
-              print(f"✅ Güncelleme tamamlandı: {total_channels} kanal, {skipped} hatalı bağlantı.")
-          except Exception as e:
-              print("❌ Gist güncellenemedi:", e)
+                          # Altındaki URL'yi ekle
+                          if i + 1 < len(lines):
+                              next_line = lines[i + 1].strip()
+                              if next_line and not next_line.startswith("#"):
+                                  combined += next_line + "\n"
+
+                  print(f"✅ {actual_link} işlendi. ({'ALL' if take_all else 'Filtreli'})")
+
+              except Exception as e:
+                  print(f"⚠️ {actual_link} indirilemedi: {e}")
+
+          # EPG varsa başa ekle
+          final_output = "#EXTM3U\n"
+          if epg_line:
+              final_output += epg_line + "\n"
+          final_output += combined
+
+          # Gist güncelle
+          update_payload = {"files": {"favoritv": {"content": final_output}}}
+          update_resp = requests.patch(gist_api, headers=headers, json=update_payload)
+
+          if update_resp.status_code == 200:
+              print("🎉 favoritv listesi başarıyla güncellendi.")
+          else:
+              print(f"❌ Gist güncellenemedi: {update_resp.status_code}, {update_resp.text}")
           PYCODE
