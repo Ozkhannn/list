@@ -63,20 +63,23 @@ jobs:
               print(f"❌ filter.txt okunamadı: {e}")
               favorite_channels = []
 
-          # normalize fonksiyonu: küçük harf, sadece harf ve rakam
-          def normalize(s):
-              return re.sub(r'[^a-z0-9]', '', (s or "").lower())
-
-          normalized_channels = [normalize(name) for name in favorite_channels]
-
           combined = "#EXTM3U\n"
 
-          # display name al
+          # sadece display name al
           def extract_display_name(extinf_line):
               parts = extinf_line.split(',', 1)
               if len(parts) == 2:
                   return parts[1].strip()
               return ""
+
+          # tam kelime bazlı eşleme (gömülü kelime yok)
+          def match_channel(display_name, filter_list):
+              dn = display_name.lower()
+              for f in filter_list:
+                  word = f.lower()
+                  if re.search(rf'\b{re.escape(word)}\b', dn):
+                      return True
+              return False
 
           for link in all_links:
               parts = [p for p in link.split('#') if p]
@@ -116,9 +119,8 @@ jobs:
                           continue
 
                       if cl.startswith("#EXTINF"):
-                          # sadece display name üzerinden filtrele
                           disp_name = extract_display_name(cl)
-                          match = take_all or any(normalize(name) in normalize(disp_name) for name in normalized_channels)
+                          match = take_all or match_channel(disp_name, favorite_channels)
 
                           if match:
                               # Mevcut kategori etiketlerini temizle
