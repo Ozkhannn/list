@@ -2,7 +2,7 @@ name: Günlük IPTV Güncelleme (favoritv Gist)
 
 on:
   schedule:
-    - cron: "0 3 * * *"  # her gün 03:00 UTC
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
               print("❌ 'links' dosyası bulunamadı.")
               raise SystemExit(1)
 
-          links_content = files["files"]["links"]["content"] if "content" in files["links"] else files["links"]["content"]
+          links_content = files["links"]["content"]
           all_links = [line.strip() for line in links_content.splitlines() if line.strip()]
           print(f"{len(all_links)} bağlantı bulundu.")
 
