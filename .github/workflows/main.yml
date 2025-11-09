@@ -2,7 +2,7 @@ name: Günlük IPTV Güncelleme (favoritv Gist)
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "0 3 * * *"  # her gün 03:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -49,28 +49,37 @@ jobs:
               print("❌ 'links' dosyası bulunamadı.")
               raise SystemExit(1)
 
-          links_content = files["links"]["content"]
+          links_content = files["files"]["links"]["content"] if "content" in files["links"] else files["links"]["content"]
           all_links = [line.strip() for line in links_content.splitlines() if line.strip()]
-
           print(f"{len(all_links)} bağlantı bulundu.")
+
+          # filter.txt oku (repo kökünde)
+          try:
+              with open("filter.txt", "r", encoding="utf-8") as f:
+                  favorite_channels = [line.strip() for line in f if line.strip()]
+          except Exception as e:
+              print(f"❌ filter.txt okunamadı: {e}")
+              favorite_channels = []
 
           combined = "#EXTM3U\n"
 
-          for link in all_links:
-              vod = False
+          for line in all_links:
+              parts = [p for p in line.split('#') if p]
               category = None
-              actual_link = link.strip()
+              take_all = False
+              actual_link = None
 
-              # # ile ayrıştırma
-              parts = [p for p in actual_link.split('#') if p]
               if parts:
-                  if parts[0].lower() == "vod":
-                      vod = True
-                      parts = parts[1:]
-                  if len(parts) == 2:
-                      category, actual_link = parts
-                  elif len(parts) == 1:
-                      actual_link = parts[0]
+                  if len(parts) == 3:  # kategori#all#URL
+                      category = parts[0]
+                      if parts[1].lower() == "all":
+                          take_all = True
+                      actual_link = parts[2]
+                  elif len(parts) == 2:  # kategori#URL
+                      category = parts[0]
+                      actual_link = parts[1]
+              else:
+                  actual_link = line
 
               actual_link = actual_link.strip()
               if not actual_link.startswith("http"):
@@ -84,26 +93,24 @@ jobs:
                       continue
 
                   content_lines = r.text.splitlines()
-                  for line in content_lines:
-                      line = line.strip()
-                      if not line:
+                  for cl in content_lines:
+                      cl = cl.strip()
+                      if not cl:
                           continue
 
-                      if line.startswith("#EXTINF"):
-                          if category:
-                              if 'tvg-group="' in line:
-                                  line = re.sub(r'tvg-group="[^"]*"', f'tvg-group="{category}"', line)
-                              else:
-                                  line = line.replace("#EXTINF:", f'#EXTINF: tvg-group="{category}" ', 1)
-                          combined += line + "\n"
-                      elif line.startswith("#"):
-                          combined += line + "\n"
+                      if cl.startswith("#EXTINF"):
+                          if take_all or any(name in cl for name in favorite_channels):
+                              if category:
+                                  if 'tvg-group="' in cl:
+                                      cl = re.sub(r'tvg-group="[^"]*"', f'tvg-group="{category}"', cl)
+                                  else:
+                                      cl = cl.replace("#EXTINF:", f'#EXTINF: tvg-group="{category}" ', 1)
+                              combined += cl + "\n"
                       else:
-                          if vod:
-                              line += "?mp4"
-                          combined += line + "\n"
+                          if take_all or any(name in cl for name in favorite_channels):
+                              combined += cl + "\n"
 
-                  print(f"✅ {actual_link} işlendi. (vod={vod}, kategori={category})")
+                  print(f"✅ {actual_link} işlendi. (kategori={category}, all={take_all})")
 
               except Exception as e:
                   print(f"⚠️ {actual_link} indirilemedi: {e}")
