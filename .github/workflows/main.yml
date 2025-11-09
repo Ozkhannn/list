@@ -21,10 +21,10 @@ jobs:
       - name: IPTV Listesini Güncelle (favoritv)
         env:
           GIST_ID: ${{ secrets.GIST_ID }}
-          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}   # Artık token kullanılıyor
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           python - <<'PYCODE'
-          import os, requests
+          import os, requests, re
 
           gist_id = os.environ.get("GIST_ID")
           github_token = os.environ.get("GITHUB_TOKEN")
@@ -50,22 +50,64 @@ jobs:
               raise SystemExit(1)
 
           links_content = files["links"]["content"]
-          all_links = [line.strip() for line in links_content.splitlines() if line.strip().startswith("http")]
+          all_links = [line.strip() for line in links_content.splitlines() if line.strip()]
 
           print(f"{len(all_links)} bağlantı bulundu.")
 
           combined = "#EXTM3U\n"
-          for link in all_links:
-              try:
-                  r = requests.get(link, timeout=20)
-                  if r.status_code == 200:
-                      combined += "\n" + r.text.strip()
-                      print(f"✅ {link} eklendi.")
-                  else:
-                      print(f"⚠️ {link} hata: {r.status_code}")
-              except Exception as e:
-                  print(f"⚠️ {link} indirilemedi: {e}")
 
+          for link in all_links:
+              vod = False
+              category = None
+              actual_link = link
+
+              # vod ve kategori ayrıştırması
+              parts = link.split(":", 2)
+              if parts[0] == "vod":
+                  vod = True
+                  if len(parts) == 3:
+                      category = parts[1]
+                      actual_link = parts[2]
+                  else:
+                      actual_link = parts[1]
+              elif len(parts) == 2:
+                  category = parts[0]
+                  actual_link = parts[1]
+
+              try:
+                  r = requests.get(actual_link, timeout=20)
+                  if r.status_code != 200:
+                      print(f"⚠️ {actual_link} hata: {r.status_code}")
+                      continue
+
+                  content_lines = r.text.splitlines()
+                  for line in content_lines:
+                      line = line.strip()
+                      if not line:
+                          continue
+
+                      if line.startswith("#EXTINF"):
+                          # TVG group işleme
+                          if category:
+                              if 'tvg-group="' in line:
+                                  line = re.sub(r'tvg-group="[^"]*"', f'tvg-group="{category}"', line)
+                              else:
+                                  line = line.replace("#EXTINF:", f'#EXTINF: tvg-group="{category}" ', 1)
+                          combined += line + "\n"
+                      elif line.startswith("#"):
+                          combined += line + "\n"
+                      else:
+                          # URL satırı
+                          if vod:
+                              line += "?mp4"
+                          combined += line + "\n"
+
+                  print(f"✅ {actual_link} işlendi. (vod={vod}, kategori={category})")
+
+              except Exception as e:
+                  print(f"⚠️ {actual_link} indirilemedi: {e}")
+
+          # Gist güncelle
           update_payload = {"files": {"favoritv": {"content": combined}}}
           update_resp = requests.patch(gist_api, headers=headers, json=update_payload)
 
