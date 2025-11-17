@@ -8,6 +8,7 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,7 +19,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests pyyaml
 
       - name: Update favoritv list
         env:
@@ -26,113 +27,91 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           python - <<'PYCODE'
-          import os, requests, re
+          import os, requests, re, yaml
 
           gist_id = os.environ.get("GIST_ID")
           github_token = os.environ.get("GITHUB_TOKEN")
 
-          if not gist_id or not github_token:
-              print("❌ GIST_ID veya GITHUB_TOKEN eksik.")
-              raise SystemExit(1)
-
           headers = {"Authorization": f"token {github_token}"}
           gist_api = f"https://api.github.com/gists/{gist_id}"
 
-          # Gist link listesini al
+          # --- GIST AL ---
           resp = requests.get(gist_api, headers=headers)
-          if resp.status_code != 200:
-              print(f"❌ Gist alınamadı: {resp.status_code}")
-              raise SystemExit(1)
-
           gist_data = resp.json()
-          files = gist_data.get("files", {})
+          links_file = gist_data["files"].get("links")
 
-          if "links" not in files:
+          if not links_file:
               print("❌ 'links' dosyası bulunamadı.")
               raise SystemExit(1)
 
-          links_content = files["links"]["content"]
-          all_links = [line.strip() for line in links_content.splitlines() if line.strip()]
+          all_links = [l.strip() for l in links_file["content"].splitlines() if l.strip()]
           print(f"🔗 {len(all_links)} bağlantı bulundu.")
 
-          # ---------------------------------------------------
-          # 📌 Yeni filter.txt parser
-          # ---------------------------------------------------
-          def load_categories():
-              categories = {}
-              current = None
+          # --- FILTER.YML OKU ---
+          filters = {}
+          try:
+              with open("filter.yml", "r", encoding="utf-8") as f:
+                  raw = f.read()
 
-              try:
-                  with open("filter.txt", "r", encoding="utf-8") as f:
-                      for line in f:
-                          line = line.strip()
-                          if not line:
-                              continue
+              current_category = None
+              for line in raw.splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  if line.startswith("[") and line.endswith("]"):
+                      current_category = line[1:-1].strip()
+                      filters[current_category] = []
+                  else:
+                      if current_category:
+                          filters[current_category] = [x.strip() for x in line.split(",") if x.strip()]
+              print(f"📁 {len(filters)} kategori yüklendi.")
+          except Exception as e:
+              print(f"⚠️ filter.yml okunamadı: {e}")
+              filters = {}
 
-                          if line.startswith("[") and line.endswith("]"):
-                              current = line[1:-1].strip()
-                              categories[current] = []
-                          else:
-                              if current:
-                                  terms = [t.strip().lower() for t in line.split(",") if t.strip()]
-                                  categories[current].extend(terms)
+          # --- Fonksiyon: Display Name ---
+          def extract_name(extinf):
+              parts = extinf.split(",", 1)
+              return parts[1].strip().lower() if len(parts) == 2 else ""
 
-                  print(f"🎯 {len(categories)} kategori yüklendi.")
-              except Exception as e:
-                  print(f"⚠️ filter.txt okunamadı: {e}")
-
-              return categories
-
-          categories = load_categories()
-
-          # ---------------------------------------------------
-
-          combined = ""
-          epg_line = None
-
-          def extract_display_name(extinf_line):
-              parts = extinf_line.split(',', 1)
-              return parts[1].strip() if len(parts) == 2 else ""
-
-          # Kanalı kategori listeleriyle eşleştir
-          def match_categories(display_name):
+          # --- Fonksiyon: Tam Kelime Eşleşmesi ---
+          def keyword_match(display_name, keyword):
               dn = display_name.lower()
-              matched = []
+              kw = keyword.lower()
 
-              for cat, terms in categories.items():
-                  for term in terms:
-                      if term in dn:  # kelime yer alıyorsa yeterli
-                          matched.append(cat)
-                          break
+              cleaned = re.sub(r'[^a-z0-9çğıöşü\s]', ' ', dn)
+              cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
-              return matched
+              words = cleaned.split()
+              return kw in words
+
+          # --- Başlangıç ---
+          epg_line = None
+          combined = ""
 
           for idx, link in enumerate(all_links):
               parts = [p for p in link.split('#') if p]
-              base_cat, take_all, actual_link = None, False, None
+              category = None
+              take_all = False
 
               if len(parts) == 3:
-                  base_cat = parts[0]
+                  category = parts[0]
                   take_all = parts[1].lower() == "all"
-                  actual_link = parts[2]
+                  actual = parts[2]
               elif len(parts) == 2:
-                  base_cat, actual_link = parts
+                  category = parts[0]
+                  actual = parts[1]
               else:
-                  actual_link = link
+                  actual = link
 
-              if not actual_link.startswith("http"):
-                  print(f"⚠️ Geçersiz URL: {actual_link}")
+              if not actual.startswith("http"):
                   continue
 
               try:
-                  r = requests.get(actual_link, timeout=60)
-                  if r.status_code != 200:
-                      print(f"⚠️ {actual_link} hata: {r.status_code}")
-                      continue
-
+                  r = requests.get(actual, timeout=60)
                   lines = r.text.splitlines()
 
-                  # İlk listeden EPG çek
+                  # EPG satırı (sadece ilk listeden)
                   if idx == 0 and epg_line is None:
                       for L in lines:
                           s = L.strip()
@@ -140,10 +119,9 @@ jobs:
                               epg_line = s
                               break
 
-                  for i, line in enumerate(lines):
-                      line = line.strip()
-                      if not line:
-                          continue
+                  # Her kanal satırı için
+                  for i in range(len(lines)):
+                      line = lines[i].strip()
 
                       if line.upper().startswith("#EXTM3U"):
                           continue
@@ -151,49 +129,51 @@ jobs:
                       if not line.startswith("#EXTINF"):
                           continue
 
-                      name = extract_display_name(line)
+                      display = extract_name(line)
+                      match_categories = []
 
-                      # ALL etiketi varsa filtre uygulanmasın
-                      if not take_all:
-                          matched_cats = match_categories(name)
-                          if not matched_cats:
-                              continue
+                      if take_all:
+                          match_categories.append(category)
                       else:
-                          matched_cats = [base_cat] if base_cat else []
+                          for cat, kw_list in filters.items():
+                              for kw in kw_list:
+                                  if keyword_match(display, kw):
+                                      match_categories.append(cat)
+                                      break
 
-                      # Orijinal grup etiketlerini sil
+                      if not match_categories:
+                          continue
+
+                      # Eski kategori etiketlerini sil
                       line = re.sub(r'group-title="[^"]*"', '', line)
                       line = re.sub(r'tvg-group="[^"]*"', '', line)
 
-                      # Birden fazla kategori olabilir
-                      cats_to_add = matched_cats if matched_cats else ([base_cat] if base_cat else [])
+                      # Her kategori için ayrı satır üret
+                      for cat in match_categories:
+                          final_line = line.replace("#EXTINF:", f'#EXTINF: group-title="{cat}" ', 1)
+                          combined += final_line + "\n"
 
-                      for cat in cats_to_add:
-                          new_line = line.replace(
-                              "#EXTINF:",
-                              f'#EXTINF: group-title="{cat}" ',
-                              1
-                          )
-                          combined += new_line + "\n"
-
-                          # Alt satırdaki URL ekle
+                          # URL ekle
                           if i + 1 < len(lines):
-                              url_line = lines[i + 1].strip()
-                              if url_line and not url_line.startswith("#"):
-                                  combined += url_line + "\n"
+                              url = lines[i + 1].strip()
+                              if url and not url.startswith("#"):
+                                  combined += url + "\n"
 
-                  print(f"✅ {actual_link} işlendi. ({'ALL' if take_all else 'Filtreli'})")
+                  print(f"✅ {actual} işlendi.")
 
               except Exception as e:
-                  print(f"⚠️ {actual_link} indirilemedi: {e}")
+                  print(f"⚠️ {actual} okunamadı: {e}")
 
+          # Son output
           final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + combined
 
+          # Gist güncelle
           update_payload = {"files": {"favoritv": {"content": final_output}}}
-          update_resp = requests.patch(gist_api, headers=headers, json=update_payload)
+          upd = requests.patch(gist_api, headers=headers, json=update_payload)
 
-          if update_resp.status_code == 200:
-              print("🎉 favoritv listesi güncellendi.")
+          if upd.status_code == 200:
+              print("🎉 Gist başarıyla güncellendi.")
           else:
-              print(f"❌ Güncellenemedi: {update_resp.status_code} {update_resp.text}")
+              print(f"❌ Gist güncellenemedi: {upd.status_code}\n{upd.text}")
+
           PYCODE
