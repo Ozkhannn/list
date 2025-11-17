@@ -1,6 +1,6 @@
 [Ulusal]
 360,beyaz,show,trt,atv,fox,dmax,tlc
 [Haber]
-cnn
+cnn,haber
 [Sinema]
-bein,film,movie,eno
+bein,film,movie,eno,sinema
