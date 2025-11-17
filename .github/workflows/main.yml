@@ -47,10 +47,10 @@ jobs:
           all_links = [l.strip() for l in links_file["content"].splitlines() if l.strip()]
           print(f"🔗 {len(all_links)} bağlantı bulundu.")
 
-          # --- FILTER.YML OKU ---
+          # --- FILTER.TXT OKU ---
           filters = {}
           try:
-              with open("filter.yml", "r", encoding="utf-8") as f:
+              with open("filter.txt", "r", encoding="utf-8") as f:
                   raw = f.read()
 
               current_category = None
@@ -66,7 +66,7 @@ jobs:
                           filters[current_category] = [x.strip() for x in line.split(",") if x.strip()]
               print(f"📁 {len(filters)} kategori yüklendi.")
           except Exception as e:
-              print(f"⚠️ filter.yml okunamadı: {e}")
+              print(f"⚠️ filter.txt okunamadı: {e}")
               filters = {}
 
           # --- Fonksiyon: Display Name ---
