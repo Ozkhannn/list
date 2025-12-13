@@ -1,5 +1,5 @@
 [Ulusal]
-360,beyaz,show,trt,atv,fox,dmax,tlc
+360,beyaz,show,trt,atv,fox,dmax,tlc,Kanal 7,
 [Haber]
 cnn,haber
 [Sinema]
