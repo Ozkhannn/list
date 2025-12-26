@@ -1,7 +1,6 @@
 name: Günlük IPTV Güncelleme (favoritv)
 
 on:
-  schedule:
   workflow_dispatch:
 
 jobs:
