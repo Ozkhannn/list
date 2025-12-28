@@ -1,6 +1,2 @@
-[Ulusal]
-360,beyaz,show,trt,atv,fox,dmax,tlc,Kanal 7,
-[Haber]
-cnn,haber
-[Sinema]
-bein,film,movie,eno,sinema
+[Otomatik]
+360,beyaz,show,trt,atv,fox,dmax,tlc,Kanal 7,cnn,haber,bein,film,movie,eno,sinema,
