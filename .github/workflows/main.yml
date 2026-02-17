@@ -2,7 +2,7 @@ name: Günlük IPTV Güncelleme 1.0 (favoritv)
 
 on:
   schedule:
-    - cron: "0 12 * * *"
+    - cron: "0 0,12 * * *"
   workflow_dispatch:
 
 jobs:
