@@ -1,4 +1,4 @@
-name: Günlük IPTV Güncelleme 1.0 (favoritv)
+name: Günlük IPTV Güncelleme (favoritv)
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Repo checkout
-        uses: actions/checkout@@v4
+        uses: actions/checkout@v4
 
       - name: Python kurulumu
         uses: actions/setup-python@v5
@@ -40,31 +40,26 @@ jobs:
           resp = requests.get(gist_api, headers=headers)
           gist_data = resp.json()
           links_file = gist_data["files"].get("links")
-
           if not links_file:
-              print("❌ 'links' dosyası bulunamadı.")
               raise SystemExit(1)
 
           all_links = [l.strip() for l in links_file["content"].splitlines() if l.strip()]
-          print(f"🔗 {len(all_links)} bağlantı bulundu.")
 
-          # --- FILTER.TXT OKU ---
+          # --- FILTER.TXT OKU (Sıralama Duyarlı) ---
           filters = {}
-          category_order = []
+          ordered_keywords = [] # Kanalların çıkış sırasını belirleyecek ana liste
           with open("filter.txt", "r", encoding="utf-8") as f:
-              current_category = None
+              current_cat = None
               for line in f:
                   line = line.strip()
-                  if not line:
-                      continue
+                  if not line or line.startswith("#"): continue
                   if line.startswith("[") and line.endswith("]"):
-                      current_category = line[1:-1]
-                      filters[current_category] = []
-                      category_order.append(current_category)
+                      current_cat = line[1:-1]
+                      filters[current_cat] = []
                   else:
-                      filters[current_category] += [
-                          x.strip() for x in line.split(",") if x.strip()
-                      ]
+                      keywords = [x.strip() for x in line.split(",") if x.strip()]
+                      filters[current_cat].extend(keywords)
+                      ordered_keywords.extend([(kw, current_cat) for kw in keywords])
 
           # --- YARDIMCI FONKSİYONLAR ---
           def extract_name(extinf):
@@ -72,105 +67,68 @@ jobs:
               return parts[1].lower() if len(parts) == 2 else ""
 
           def keyword_match(display_name, keyword):
-              # REGEX GÜNCELLEMESİ: Kelimeyi isim içinde esnekçe arar
+              # REGEX: Kelimeyi isim içinde tam isabetle arar
               pattern = re.compile(re.escape(keyword.lower()))
               return bool(pattern.search(display_name))
 
-          # --- BAŞLANGIÇ ---
-          # Kanalları kategorilerine göre depolamak için liste (Blok sıralama için)
-          categorized_contents = {cat: [] for cat in category_order}
-          raw_content = "" 
+          # --- VERİ TOPLAMA ---
           epg_line = None
+          raw_content = ""
+          # Anahtar kelimeye göre kanalları biriktir: {(keyword, cat): "kanallar..."}
+          keyword_buckets = {item: "" for item in ordered_keywords}
 
           for idx, link in enumerate(all_links):
-              raw_mode = False
-              if link.lower().startswith("all#"):
-                  raw_mode = True
-                  actual = link[4:]
-              else:
-                  actual = link
-
-              if not actual.startswith("http"):
-                  continue
+              raw_mode = link.lower().startswith("all#")
+              actual = link[4:] if raw_mode else link
+              if not actual.startswith("http"): continue
 
               try:
                   r = requests.get(actual, timeout=60)
-                  r.encoding = 'utf-8' # Karakter sorunu yaşamamak için
+                  r.encoding = 'utf-8'
                   lines = r.text.splitlines()
 
-                  # EPG (sadece ilk listeden veya bulana kadar)
-                  if epg_line is None:
+                  if idx == 0 and epg_line is None:
                       for l in lines:
                           if l.strip().upper().startswith("#EXTM3U"):
                               epg_line = l.strip()
                               break
 
-                  # --- LİSTE TARAMA ---
+                  if raw_mode:
+                      for l in lines:
+                          if l.strip().upper().startswith("#EXTM3U"): continue
+                          raw_content += l.strip() + "\n"
+                      continue
+
                   i = 0
                   while i < len(lines):
                       line = lines[i].strip()
-
-                      if not line.startswith("#EXTINF"):
+                      if line.startswith("#EXTINF"):
+                          display = extract_name(line)
+                          url = lines[i+1].strip() if i+1 < len(lines) else ""
+                          
+                          if url and not url.startswith("#"):
+                              # Kelime sırasına göre tara
+                              for (kw, cat) in ordered_keywords:
+                                  if keyword_match(display, kw):
+                                      clean = re.sub(r'(group-title|tvg-group)="[^"]*"', '', line)
+                                      final = clean.replace("#EXTINF:", f'#EXTINF: group-title="{cat}" ', 1)
+                                      keyword_buckets[(kw, cat)] += final + "\n" + url + "\n"
+                                      break # İlk eşleştiği kelimeye girsin
+                          i += 2
+                      else:
                           i += 1
-                          continue
+              except: continue
 
-                      # 🔥 RAW MODE → Direkt ham depoya
-                      if raw_mode:
-                          if i + 1 < len(lines):
-                              url = lines[i + 1].strip()
-                              if url and not url.startswith("#"):
-                                  raw_content += line + "\n" + url + "\n"
-                          i += 1
-                          continue
+          # --- SIRALI BİRLEŞTİRME ---
+          final_body = raw_content
+          # filter.txt'deki kelime sırasına göre havuzları boşalt
+          for item in ordered_keywords:
+              final_body += keyword_buckets[item]
 
-                      # 🔍 FILTER MODE → Kategorilere ayırarak havuzda biriktir
-                      display = extract_name(line)
-                      found_match = False
-                      for cat in category_order:
-                          for kw in filters[cat]:
-                              if keyword_match(display, kw):
-                                  clean = re.sub(r'(group-title|tvg-group)="[^"]*"', '', line)
-                                  final = clean.replace(
-                                      "#EXTINF:",
-                                      f'#EXTINF: group-title="{cat}" ',
-                                      1
-                                  )
-                                  
-                                  if i + 1 < len(lines):
-                                      url = lines[i + 1].strip()
-                                      if url and not url.startswith("#"):
-                                          # Burası önemli: Listeye ekliyoruz, metne değil
-                                          categorized_contents[cat].append(final + "\n" + url)
-                                  
-                                  found_match = True
-                                  break
-                          if found_match: break
-                      i += 1
-
-                  print(f"✅ {actual} işlendi.")
-
-              except Exception as e:
-                  print(f"⚠️ {actual} okunamadı: {e}")
-
-          # --- SIRALI BİRLEŞTİRME (KATEGORİ BLOKLARI) ---
-          final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n")
-          
-          # 1. Önce all# ile gelen ham kanallar (Başa)
-          if raw_content:
-              final_output += raw_content.strip() + "\n"
-
-          # 2. Sonra filter.txt'deki sıraya göre BLOK BLOK ekleme
-          for cat in category_order:
-              if categorized_contents[cat]:
-                  # O kategoriye ait tüm linklerden gelen kanalları tek seferde ekler
-                  final_output += "\n".join(categorized_contents[cat]) + "\n"
+          final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + final_body
 
           # --- GIST GÜNCELLE ---
           payload = {"files": {"favoritv": {"content": final_output}}}
-          upd = requests.patch(gist_api, headers=headers, json=payload)
-
-          if upd.status_code == 200:
-              print("🎉 Gist güncellendi. Sıralama: RAW -> Kategori Blokları")
-          else:
-              print(f"❌ Gist güncellenemedi: {upd.status_code}")
+          requests.patch(gist_api, headers=headers, json=payload)
+          print("🎉 Kanal sırasına göre Gist güncellendi.")
           PYCODE
