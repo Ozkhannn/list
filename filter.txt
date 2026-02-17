@@ -1,2 +1,2 @@
 [Otomatik]
-360,beyaz,show,trt,atv,fox,dmax,tlc,Kanal 7,cnn,haber,bein,film,movie,eno,sinema,
+360,beyaz,show,trt,atv,fox,dmax,tlc,Kanal 7,cnn,haber,bein,film,movie,eno,sinema,play
