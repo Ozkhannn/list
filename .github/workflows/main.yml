@@ -1,4 +1,4 @@
-name: Günlük IPTV Güncelleme (favoritv)
+name: Günlük IPTV Güncelleme 1.0 (favoritv)
 
 on:
   schedule:
@@ -50,6 +50,7 @@ jobs:
 
           # --- FILTER.TXT OKU ---
           filters = {}
+          category_order = []
           with open("filter.txt", "r", encoding="utf-8") as f:
               current_category = None
               for line in f:
@@ -59,12 +60,15 @@ jobs:
                   if line.startswith("[") and line.endswith("]"):
                       current_category = line[1:-1]
                       filters[current_category] = []
+                      category_order.append(current_category)
                   else:
                       filters[current_category] += [
                           x.strip() for x in line.split(",") if x.strip()
                       ]
 
-          print(f"📁 {len(filters)} kategori yüklendi.")
+          # Kategorilere göre kanalları biriktirecek sözlük
+          categorized_contents = {cat: "" for cat in category_order}
+          raw_content = "" # 'all#' linkleri için depo (Listenin başına gidecek)
 
           # --- YARDIMCI FONKSİYONLAR ---
           def extract_name(extinf):
@@ -78,12 +82,9 @@ jobs:
 
           # --- BAŞLANGIÇ ---
           epg_line = None
-          combined = ""
 
           for idx, link in enumerate(all_links):
-
               raw_mode = False
-
               if link.lower().startswith("all#"):
                   raw_mode = True
                   actual = link[4:]
@@ -104,15 +105,14 @@ jobs:
                               epg_line = l.strip()
                               break
 
-                  # 🔥 RAW MODE → olduğu gibi al
+                  # 🔥 RAW MODE → Listenin başına gitmek üzere biriktir
                   if raw_mode:
                       for l in lines:
                           s = l.strip()
                           if s.upper().startswith("#EXTM3U"):
                               continue
-                          combined += s + "\n"
-
-                      print(f"✅ {actual} (ALL) eklendi.")
+                          raw_content += s + "\n"
+                      print(f"✅ {actual} (ALL) başa eklenmek üzere hazırlandı.")
                       continue
 
                   # 🔍 FILTER MODE
@@ -125,31 +125,28 @@ jobs:
                           continue
 
                       display = extract_name(line)
-                      matched = []
-
-                      for cat, kws in filters.items():
-                          for kw in kws:
+                      
+                      found_match = False
+                      for cat in category_order:
+                          for kw in filters[cat]:
                               if keyword_match(display, kw):
-                                  matched.append(cat)
+                                  clean = re.sub(r'group-title="[^"]*"', '', line)
+                                  clean = re.sub(r'tvg-group="[^"]*"', '', clean)
+                                  
+                                  final = clean.replace(
+                                      "#EXTINF:",
+                                      f'#EXTINF: group-title="{cat}" ',
+                                      1
+                                  )
+                                  
+                                  if i + 1 < len(lines):
+                                      url = lines[i + 1].strip()
+                                      if url and not url.startswith("#"):
+                                          categorized_contents[cat] += final + "\n" + url + "\n"
+                                  
+                                  found_match = True
                                   break
-
-                      if matched:
-                          clean = re.sub(r'group-title="[^"]*"', '', line)
-                          clean = re.sub(r'tvg-group="[^"]*"', '', clean)
-
-                          for cat in matched:
-                              final = clean.replace(
-                                  "#EXTINF:",
-                                  f'#EXTINF: group-title="{cat}" ',
-                                  1
-                              )
-                              combined += final + "\n"
-
-                              if i + 1 < len(lines):
-                                  url = lines[i + 1].strip()
-                                  if url and not url.startswith("#"):
-                                      combined += url + "\n"
-
+                          if found_match: break
                       i += 1
 
                   print(f"✅ {actual} işlendi.")
@@ -157,7 +154,16 @@ jobs:
               except Exception as e:
                   print(f"⚠️ {actual} okunamadı: {e}")
 
-          # --- ÇIKTI ---
+          # --- SIRALI BİRLEŞTİRME (YENİ SIRA: RAW -> FILTER) ---
+          combined = ""
+          
+          # 1. Önce all# ile gelen ham kanallar (Başa)
+          combined += raw_content
+
+          # 2. Sonra filter.txt'deki sıraya göre kategorize edilmiş kanallar
+          for cat in category_order:
+              combined += categorized_contents[cat]
+
           final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + combined
 
           # --- GIST GÜNCELLE ---
@@ -165,7 +171,7 @@ jobs:
           upd = requests.patch(gist_api, headers=headers, json=payload)
 
           if upd.status_code == 200:
-              print("🎉 Gist başarıyla güncellendi.")
+              print("🎉 Gist güncellendi. (Sıralama: ALL kanalları -> Filtre sırası)")
           else:
               print(f"❌ Gist güncellenemedi: {upd.status_code}")
           PYCODE
