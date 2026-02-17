@@ -1,4 +1,4 @@
-name: Günlük IPTV Güncelleme (favoritv)
+name: Günlük IPTV Güncelleme 1.0 (favoritv)
 
 on:
   schedule:
@@ -19,8 +19,7 @@ jobs:
           python-version: '3.x'
 
       - name: Gerekli paketler
-        run: |
-          pip install requests
+        run: pip install requests
 
       - name: IPTV listesini güncelle
         env:
@@ -32,62 +31,59 @@ jobs:
 
           gist_id = os.environ.get("GIST_ID")
           github_token = os.environ.get("GITHUB_TOKEN")
-
           headers = {"Authorization": f"token {github_token}"}
           gist_api = f"https://api.github.com/gists/{gist_id}"
 
-          # --- GIST AL ---
-          resp = requests.get(gist_api, headers=headers)
-          gist_data = resp.json()
-          links_file = gist_data["files"].get("links")
-          if not links_file:
-              raise SystemExit(1)
+          # 1. GIST'TEN LİNKLERİ ÇEK
+          try:
+              resp = requests.get(gist_api, headers=headers)
+              links_content = resp.json()["files"]["links"]["content"]
+              all_links = [l.strip() for l in links_content.splitlines() if l.strip()]
+              print(f"🔍 Toplam {len(all_links)} kaynak bağlantısı Gist üzerinden alındı.\n")
+          except Exception:
+              print("❌ Hata: Gist üzerindeki 'links' dosyasına ulaşılamadı!")
+              exit(1)
 
-          all_links = [l.strip() for l in links_file["content"].splitlines() if l.strip()]
-
-          # --- FILTER.TXT OKU (Sıralama Duyarlı) ---
-          filters = {}
-          ordered_keywords = [] # Kanalların çıkış sırasını belirleyecek ana liste
+          # 2. FILTER.TXT OKU
+          ordered_keywords = [] 
           with open("filter.txt", "r", encoding="utf-8") as f:
-              current_cat = None
+              current_cat = "Genel"
               for line in f:
                   line = line.strip()
                   if not line or line.startswith("#"): continue
                   if line.startswith("[") and line.endswith("]"):
                       current_cat = line[1:-1]
-                      filters[current_cat] = []
                   else:
                       keywords = [x.strip() for x in line.split(",") if x.strip()]
-                      filters[current_cat].extend(keywords)
-                      ordered_keywords.extend([(kw, current_cat) for kw in keywords])
+                      for kw in keywords:
+                          ordered_keywords.append((kw, current_cat))
 
-          # --- YARDIMCI FONKSİYONLAR ---
-          def extract_name(extinf):
-              parts = extinf.split(",", 1)
-              return parts[1].lower() if len(parts) == 2 else ""
+          # 3. YARDIMCI ARAÇLAR VE SAYAÇLAR
+          def keyword_match(name, keyword):
+              return bool(re.search(re.escape(keyword.lower()), name.lower()))
 
-          def keyword_match(display_name, keyword):
-              # REGEX: Kelimeyi isim içinde tam isabetle arar
-              pattern = re.compile(re.escape(keyword.lower()))
-              return bool(pattern.search(display_name))
-
-          # --- VERİ TOPLAMA ---
           epg_line = None
           raw_content = ""
-          # Anahtar kelimeye göre kanalları biriktir: {(keyword, cat): "kanallar..."}
           keyword_buckets = {item: "" for item in ordered_keywords}
+          
+          total_found = 0
+          raw_count = 0
 
-          for idx, link in enumerate(all_links):
+          # 4. KAYNAKLARI TARA VE BİLGİ VER
+          print("🚀 Tarama işlemi başlatılıyor...\n" + "-"*50)
+          for link in all_links:
               raw_mode = link.lower().startswith("all#")
-              actual = link[4:] if raw_mode else link
-              if not actual.startswith("http"): continue
+              url = link[4:] if raw_mode else link
+              if not url.startswith("http"): continue
 
               try:
-                  r = requests.get(actual, timeout=60)
+                  r = requests.get(url, timeout=20)
                   r.encoding = 'utf-8'
                   lines = r.text.splitlines()
+                  
+                  link_count = 0 # Bu linkten alınan kanal sayısı
 
-                  if idx == 0 and epg_line is None:
+                  if epg_line is None:
                       for l in lines:
                           if l.strip().upper().startswith("#EXTM3U"):
                               epg_line = l.strip()
@@ -95,40 +91,52 @@ jobs:
 
                   if raw_mode:
                       for l in lines:
-                          if l.strip().upper().startswith("#EXTM3U"): continue
-                          raw_content += l.strip() + "\n"
+                          if l.strip().startswith("#EXTINF"):
+                              raw_count += 1
+                              link_count += 1
+                          if not l.strip().upper().startswith("#EXTM3U"):
+                              raw_content += l.strip() + "\n"
+                      print(f"✅ [RAW] {url[:50]}... -> {link_count} kanal eklendi.")
                       continue
 
                   i = 0
                   while i < len(lines):
                       line = lines[i].strip()
                       if line.startswith("#EXTINF"):
-                          display = extract_name(line)
-                          url = lines[i+1].strip() if i+1 < len(lines) else ""
+                          display_name = line.split(",", 1)[1].lower() if "," in line else ""
+                          url_line = lines[i+1].strip() if i+1 < len(lines) else ""
                           
-                          if url and not url.startswith("#"):
-                              # Kelime sırasına göre tara
+                          if url_line and not url_line.startswith("#"):
                               for (kw, cat) in ordered_keywords:
-                                  if keyword_match(display, kw):
-                                      clean = re.sub(r'(group-title|tvg-group)="[^"]*"', '', line)
-                                      final = clean.replace("#EXTINF:", f'#EXTINF: group-title="{cat}" ', 1)
-                                      keyword_buckets[(kw, cat)] += final + "\n" + url + "\n"
-                                      break # İlk eşleştiği kelimeye girsin
+                                  if keyword_match(display_name, kw):
+                                      clean = re.sub(r'(group-title|tvg-group|tvg-name)="[^"]*"', '', line)
+                                      final_inf = clean.replace("#EXTINF:", f'#EXTINF: group-title="{cat}"', 1)
+                                      keyword_buckets[(kw, cat)] += f"{final_inf}\n{url_line}\n"
+                                      link_count += 1
+                                      total_found += 1
+                                      break
                           i += 2
-                      else:
-                          i += 1
-              except: continue
+                      else: i += 1
+                  print(f"✅ [FİLTRE] {url[:50]}... -> {link_count} kanal eşleşti.")
 
-          # --- SIRALI BİRLEŞTİRME ---
+              except Exception:
+                  print(f"❌ HATA: {url[:50]}... bağlantı sağlanamadı veya liste bozuk.")
+
+          # 5. BİRLEŞTİR VE GÜNCELLE
+          print("-"*50)
           final_body = raw_content
-          # filter.txt'deki kelime sırasına göre havuzları boşalt
           for item in ordered_keywords:
               final_body += keyword_buckets[item]
 
           final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + final_body
-
-          # --- GIST GÜNCELLE ---
-          payload = {"files": {"favoritv": {"content": final_output}}}
-          requests.patch(gist_api, headers=headers, json=payload)
-          print("🎉 Kanal sırasına göre Gist güncellendi.")
+          
+          upd = requests.patch(gist_api, headers=headers, json={"files": {"favoritv": {"content": final_output}}})
+          
+          if upd.status_code == 200:
+              print(f"\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨")
+              print(f"📦 Ham Liste: {raw_count} kanal")
+              print(f"🎯 Filtrelenen: {total_found} kanal")
+              print(f"📊 Toplam Çıktı: {raw_count + total_found} kanal Gist'e yazıldı.")
+          else:
+              print(f"\n❌ Gist Güncelleme Hatası! Kod: {upd.status_code}")
           PYCODE
