@@ -1,2 +1,2 @@
 [Otomatik]
-360,beyaz,show,atv,fox,teve2,tv2,,viasat,history,national,discovery,dmax,tlc,Kanal 7,cnn,haber,bein,film,movie,eno,sinema,cine,vizon,play,fil,box,Aksiyon,Macera,bilim,aile,yabancı,
+360,beyaz,show,atv,fox,teve2,tv2,tv4,viasat,history,national,discovery,dmax,tlc,Kanal 7,cnn,haber,bein,film,movie,eno,sinema,cine,vizon,play,fil,box,Aksiyon,Macera,bilim,aile,yabancı,
