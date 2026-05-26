@@ -72,8 +72,23 @@ jobs:
           # 4. KAYNAKLARI TARA VE BİLGİ VER
           print("🚀 Tarama işlemi başlatılıyor...\n" + "-"*50)
           for link in all_links:
-              raw_mode = link.lower().startswith("all#")
-              url = link[4:] if raw_mode else link
+              # Link etiketini ve modunu dinamik olarak ayıkla (Örn: TR#http... veya ALL#DE#http...)
+              tag = ""
+              raw_mode = False
+              
+              current_link = link
+              if current_link.lower().startswith("all#"):
+                  raw_mode = True
+                  current_link = current_link[4:] # 'all#' kısmını atla
+                  
+              # URL öncesinde bir etiket var mı kontrol et (Örn: TR#http...)
+              if "#http" in current_link.lower():
+                  parts = current_link.split("#", 1)
+                  tag = parts[0].strip()
+                  url = parts[1].strip()
+              else:
+                  url = current_link
+
               if not url.startswith("http"): continue
 
               try:
@@ -90,13 +105,25 @@ jobs:
                               break
 
                   if raw_mode:
-                      for l in lines:
-                          if l.strip().startswith("#EXTINF"):
+                      i = 0
+                      while i < len(lines):
+                          l = lines[i].strip()
+                          if l.startswith("#EXTINF"):
                               raw_count += 1
                               link_count += 1
-                          if not l.strip().upper().startswith("#EXTM3U"):
-                              raw_content += l.strip() + "\n"
-                      print(f"✅ [RAW] {url[:50]}... -> {link_count} kanal eklendi.")
+                              
+                              # RAW modunda kanal isminin sonuna etiket ekleme
+                              if tag and "," in l:
+                                  base_inf, ch_name = l.rsplit(",", 1)
+                                  l = f"{base_inf},{ch_name.strip()} ({tag})"
+                              
+                              url_line = lines[i+1].strip() if i+1 < len(lines) else ""
+                              if url_line and not url_line.startswith("#"):
+                                  raw_content += f"{l}\n{url_line}\n"
+                                  i += 2
+                                  continue
+                          i += 1
+                      print(f"✅ [RAW] {url[:50]}... -> {link_count} kanal eklendi. (Etiket: {tag if tag else 'Yok'})")
                       continue
 
                   i = 0
@@ -110,17 +137,23 @@ jobs:
                               for (kw, cat) in ordered_keywords:
                                   if keyword_match(display_name, kw):
                                       clean = re.sub(r'(group-title|tvg-group|tvg-name)="[^"]*"', '', line)
+                                      
+                                      # Filtre modunda kanal isminin sonuna etiket ekleme
+                                      if tag and "," in clean:
+                                          base_inf, ch_name = clean.rsplit(",", 1)
+                                          clean = f"{base_inf},{ch_name.strip()} ({tag})"
+                                          
                                       final_inf = clean.replace("#EXTINF:", f'#EXTINF: group-title="{cat}"', 1)
                                       keyword_buckets[(kw, cat)] += f"{final_inf}\n{url_line}\n"
                                       link_count += 1
                                       total_found += 1
                                       break
-                          i += 2
+                              i += 2
                       else: i += 1
-                  print(f"✅ [FİLTRE] {url[:50]}... -> {link_count} kanal eşleşti.")
+                  print(f"✅ [FİLTRE] {url[:50]}... -> {link_count} kanal eşleşti. (Etiket: {tag if tag else 'Yok'})")
 
-              except Exception:
-                  print(f"❌ HATA: {url[:50]}... bağlantı sağlanamadı veya liste bozuk.")
+              except Exception as e:
+                  print(f"❌ HATA: {url[:50]}... bağlantı sağlanamadı veya liste bozuk. Hata: {e}")
 
           # 5. BİRLEŞTİR VE GÜNCELLE
           print("-"*50)
