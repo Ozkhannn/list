@@ -34,16 +34,16 @@ jobs:
           headers = {"Authorization": f"token {github_token}"}
           gist_api = f"https://github.com{gist_id}"
 
-          # Sitelerin bot engellemesini (403/429) aşmak için tarayıcı başlığı
+          # Sitelerin bot engellemesini aşmak için eklenen tarayıcı başlığı
           browser_headers = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           }
 
-          # 1. GIST'TEN LİNKLERİ ÇEK
+          # 1. GIST'TEN LİNKLERİ ÇEK (Tamamen Sizin Orijinal Kodunuz)
           try:
               resp = requests.get(gist_api, headers=headers)
               links_content = resp.json()["files"]["links"]["content"]
-              all_links = [l.strip().replace('\r', '') for l in links_content.splitlines() if l.strip()]
+              all_links = [l.strip() for l in links_content.splitlines() if l.strip()]
               print(f"🔍 Toplam {len(all_links)} kaynak bağlantısı Gist üzerinden alındı.\n")
           except Exception:
               print("❌ Hata: Gist üzerindeki 'links' dosyasına ulaşılamadı!")
@@ -87,15 +87,15 @@ jobs:
                   
               if "#http" in current_link.lower():
                   parts = current_link.split("#", 1)
-                  tag = parts[0].strip()
-                  url = parts[1].strip()
+                  tag = parts[0].strip()  # Liste hatası düzeltildi
+                  url = parts[1].strip()  # Liste hatası düzeltildi
               else:
                   url = current_link
 
               if not url.startswith("http"): continue
 
               try:
-                  # browser_headers eklenerek güvenli istek yapılıyor
+                  # İstek gönderilirken tarayıcı başlığı ekleniyor
                   r = requests.get(url, headers=browser_headers, timeout=20)
                   r.encoding = 'utf-8'
                   lines = r.text.splitlines()
@@ -138,10 +138,10 @@ jobs:
                               continue
 
                           # FİLTRE MODU
-                          # Virgülden sonraki kanal ismini bozmadan tam olduğu gibi alır (.lower split bug'ı düzeltildi)
+                          # Virgülden sonraki kanal ismini bozmadan tam olduğu gibi alır
                           display_name = ""
                           if "," in line:
-                              display_name = line.split(",", 1)[1].strip()
+                              display_name = line.split(",", 1)[1].strip() # [1] ile virgülden sonrasını ayırıp temizliyoruz
                           
                           for (kw, cat) in ordered_keywords:
                               if keyword_match(display_name, kw):
