@@ -32,13 +32,18 @@ jobs:
           gist_id = os.environ.get("GIST_ID")
           github_token = os.environ.get("GITHUB_TOKEN")
           headers = {"Authorization": f"token {github_token}"}
-          gist_api = f"https://api.github.com/gists/{gist_id}"
+          gist_api = f"https://github.com{gist_id}"
+
+          # Sitelerin bot engellemesini (403/429) aşmak için tarayıcı başlığı
+          browser_headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
 
           # 1. GIST'TEN LİNKLERİ ÇEK
           try:
               resp = requests.get(gist_api, headers=headers)
               links_content = resp.json()["files"]["links"]["content"]
-              all_links = [l.strip() for l in links_content.splitlines() if l.strip()]
+              all_links = [l.strip().replace('\r', '') for l in links_content.splitlines() if l.strip()]
               print(f"🔍 Toplam {len(all_links)} kaynak bağlantısı Gist üzerinden alındı.\n")
           except Exception:
               print("❌ Hata: Gist üzerindeki 'links' dosyasına ulaşılamadı!")
@@ -90,7 +95,8 @@ jobs:
               if not url.startswith("http"): continue
 
               try:
-                  r = requests.get(url, timeout=20)
+                  # browser_headers eklenerek güvenli istek yapılıyor
+                  r = requests.get(url, headers=browser_headers, timeout=20)
                   r.encoding = 'utf-8'
                   lines = r.text.splitlines()
                   
@@ -102,46 +108,57 @@ jobs:
                               epg_line = l.strip()
                               break
 
-                  # RAW MODU (GÜVENLİ VE HIZLI DÖNGÜ)
-                  if raw_mode:
-                      for idx, l in enumerate(lines):
-                          l = l.strip()
-                          if l.startswith("#EXTINF"):
-                              raw_count += 1
-                              link_count += 1
-                              
-                              if tag and "," in l:
-                                  base_inf, ch_name = l.rsplit(",", 1)
-                                  l = f"{base_inf},{ch_name.strip()} ({tag})"
-                              
-                              url_line = lines[idx+1].strip() if idx+1 < len(lines) else ""
-                              if url_line and not url_line.startswith("#"):
-                                  raw_content += f"{l}\n{url_line}\n"
-                      print(f"✅ [RAW] {url[:50]}... -> {link_count} kanal eklendi. (Etiket: {tag if tag else 'Yok'})")
-                      continue
-
-                  # FİLTRE MODU (GÜVENLİ VE HIZLI DÖNGÜ)
+                  # DİNAMİK SATIR TABANLI GÜVENLİ OKUMA DÖNGÜSÜ
                   for idx, line in enumerate(lines):
                       line = line.strip()
                       if line.startswith("#EXTINF"):
-                          display_name = line.split(",", 1)[1].lower() if "," in line else ""
-                          url_line = lines[idx+1].strip() if idx+1 < len(lines) else ""
                           
-                          if url_line and not url_line.startswith("#"):
-                              for (kw, cat) in ordered_keywords:
-                                  if keyword_match(display_name, kw):
-                                      clean = re.sub(r'(group-title|tvg-group|tvg-name)="[^"]*"', '', line)
+                          # Araya giren boşluk veya #EXTGRP satırlarını atlayarak gerçek URL'yi bulur
+                          url_line = ""
+                          for next_idx in range(idx + 1, len(lines)):
+                              next_line = lines[next_idx].strip()
+                              if not next_line: continue
+                              if next_line.startswith("#"): continue
+                              url_line = next_line
+                              break
+                          
+                          # Geçerli bir URL satırı yoksa bu kanalı pas geç
+                          if not url_line: continue
+
+                          # RAW MODU
+                          if raw_mode:
+                              raw_count += 1
+                              link_count += 1
+                              
+                              if tag and "," in line:
+                                  base_inf, ch_name = line.rsplit(",", 1)
+                                  line = f"{base_inf},{ch_name.strip()} ({tag})"
+                              
+                              raw_content += f"{line}\n{url_line}\n"
+                              continue
+
+                          # FİLTRE MODU
+                          # Virgülden sonraki kanal ismini bozmadan tam olduğu gibi alır (.lower split bug'ı düzeltildi)
+                          display_name = ""
+                          if "," in line:
+                              display_name = line.split(",", 1)[1].strip()
+                          
+                          for (kw, cat) in ordered_keywords:
+                              if keyword_match(display_name, kw):
+                                  clean = re.sub(r'(group-title|tvg-group|tvg-name)="[^"]*"', '', line)
+                                  
+                                  if tag and "," in clean:
+                                      base_inf, ch_name = clean.rsplit(",", 1)
+                                      clean = f"{base_inf},{ch_name.strip()} ({tag})"
                                       
-                                      if tag and "," in clean:
-                                          base_inf, ch_name = clean.rsplit(",", 1)
-                                          clean = f"{base_inf},{ch_name.strip()} ({tag})"
-                                          
-                                      final_inf = clean.replace("#EXTINF:", f'#EXTINF: group-title="{cat}"', 1)
-                                      keyword_buckets[(kw, cat)] += f"{final_inf}\n{url_line}\n"
-                                      link_count += 1
-                                      total_found += 1
-                                      break
-                  print(f"✅ [FİLTRE] {url[:50]}... -> {link_count} kanal eşleşti. (Etiket: {tag if tag else 'Yok'})")
+                                  final_inf = clean.replace("#EXTINF:", f'#EXTINF: group-title="{cat}"', 1)
+                                  keyword_buckets[(kw, cat)] += f"{final_inf}\n{url_line}\n"
+                                  link_count += 1
+                                  total_found += 1
+                                  break
+                                  
+                  mode_str = "RAW" if raw_mode else "FİLTRE"
+                  print(f"✅ [{mode_str}] {url[:50]}... -> {link_count} kanal eklendi. (Etiket: {tag if tag else 'Yok'})")
 
               except Exception as e:
                   print(f"❌ HATA: {url[:50]}... bağlantı sağlanamadı veya liste bozuk. Hata: {e}")
