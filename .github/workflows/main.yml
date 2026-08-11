@@ -157,11 +157,18 @@ jobs:
               except Exception as e:
                   print(f"❌ HATA: {url[:50]}... bağlantı sağlanamadı veya liste bozuk. Hata: {e}")
 
-          # 5. BİRLEŞTİR VE GÜNCELLE (Tamamen Orijinal)
+          # 5. BİRLEŞTİR VE GÜNCELLE (Düzeltildi)
           print("-"*50)
-          final_body = raw_content
-          for item in ordered_keywords:
-              final_body += keyword_buckets[item]
+          
+          # Eğer bir RAW (ana liste) linki işlendiyse, SADECE o içeriği almasını sağlıyoruz.
+          if raw_content:
+              final_body = raw_content
+              print("ℹ️ Ana liste (RAW) bulundu. Sadece ana listenin içeriği aktarılıyor.")
+          else:
+              final_body = ""
+              for item in ordered_keywords:
+                  final_body += keyword_buckets[item]
+              print("ℹ️ Ana liste bulunamadı. Filtrelenen kanallar aktarılıyor.")
 
           final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + final_body
           
@@ -169,9 +176,10 @@ jobs:
           
           if upd.status_code == 200:
               print(f"\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨")
-              print(f"📦 Ham Liste: {raw_count} kanal")
-              print(f"🎯 Filtrelenen: {total_found} kanal")
-              print(f"📊 Toplam Çıktı: {raw_count + total_found} kanal Gist'e yazıldı.")
+              if raw_content:
+                  print(f"📦 Ham Liste: {raw_count} kanal Gist'e olduğu gibi yazıldı.")
+              else:
+                  print(f"🎯 Filtrelenen: {total_found} kanal Gist'e yazıldı.")
           else:
               print(f"\n❌ Gist Güncelleme Hatası! Kod: {upd.status_code}")
           PYCODE
