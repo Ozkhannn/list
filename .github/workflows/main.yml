@@ -27,183 +27,338 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           python <<'PYCODE'
-          import os, requests, re
+          import os
+          import requests
+          import re
 
           gist_id = os.environ.get("GIST_ID")
           github_token = os.environ.get("GITHUB_TOKEN")
-          headers = {"Authorization": f"token {github_token}"}
-          gist_api = f"https://api.github.com/gists/{gist_id}"
 
-          # Sitelerin bot engellemesini aşmak için eklenen tarayıcı başlığı
-          browser_headers = {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          headers = {
+              "Authorization": f"token {github_token}"
           }
 
+          gist_api = f"https://api.github.com/gists/{gist_id}"
+
+          # Sitelerin bot engellemesini azaltmak için tarayıcı başlığı
+          browser_headers = {
+              "User-Agent": (
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/120.0.0.0 Safari/537.36"
+              )
+          }
+
+          # =========================================================
           # 1. GIST'TEN LİNKLERİ ÇEK
+          # =========================================================
+
           try:
-              resp = requests.get(gist_api, headers=headers)
-              links_content = resp.json()["files"]["links"]["content"]
-              all_links = [l.strip() for l in links_content.splitlines() if l.strip()]
-              print(f"🔍 Toplam {len(all_links)} kaynak bağlantısı Gist üzerinden alındı.\n")
-          except Exception:
-              print("❌ Hata: Gist üzerindeki 'links' dosyasına ulaşılamadı!")
+              resp = requests.get(
+                  gist_api,
+                  headers=headers,
+                  timeout=30
+              )
+
+              if resp.status_code != 200:
+                  print(
+                      f"❌ Gist okunamadı! "
+                      f"HTTP kodu: {resp.status_code}"
+                  )
+                  exit(1)
+
+              gist_data = resp.json()
+
+              links_content = (
+                  gist_data["files"]["links"]["content"]
+              )
+
+              all_links = [
+                  l.strip()
+                  for l in links_content.splitlines()
+                  if l.strip()
+              ]
+
+              print(
+                  f"🔍 Toplam {len(all_links)} kaynak bağlantısı "
+                  f"Gist üzerinden alındı.\n"
+              )
+
+          except Exception as e:
+              print(
+                  "❌ Hata: Gist üzerindeki 'links' dosyasına "
+                  f"ulaşılamadı! Hata: {e}"
+              )
               exit(1)
 
+          # =========================================================
           # 2. FILTER.TXT OKU
+          # =========================================================
+
           ordered_keywords = []
+
           with open("filter.txt", "r", encoding="utf-8") as f:
+
               current_cat = "Genel"
+
               for line in f:
+
                   line = line.strip()
+
                   if not line or line.startswith("#"):
                       continue
 
                   if line.startswith("[") and line.endswith("]"):
-                      current_cat = line[1:-1]
-                  else:
-                      keywords = [x.strip() for x in line.split(",") if x.strip()]
-                      for kw in keywords:
-                          ordered_keywords.append((kw, current_cat))
 
+                      current_cat = line[1:-1]
+
+                  else:
+
+                      keywords = [
+                          x.strip()
+                          for x in line.split(",")
+                          if x.strip()
+                      ]
+
+                      for kw in keywords:
+                          ordered_keywords.append(
+                              (kw, current_cat)
+                          )
+
+          # =========================================================
           # 3. YARDIMCI ARAÇLAR VE SAYAÇLAR
+          # =========================================================
+
           def keyword_match(name, keyword):
-              return bool(re.search(re.escape(keyword.lower()), name.lower()))
+              return bool(
+                  re.search(
+                      re.escape(keyword.lower()),
+                      name.lower()
+                  )
+              )
 
           epg_line = None
 
-          # all# kaynaklarının TAMAMEN olduğu gibi tutulacağı alan
+          # all# kaynaklarının TAM içeriği
           raw_content = ""
 
-          # Normal kaynakların filter.txt sonuçları
-          keyword_buckets = {item: "" for item in ordered_keywords}
+          # Normal kaynakların filtrelenmiş içerikleri
+          keyword_buckets = {
+              item: ""
+              for item in ordered_keywords
+          }
 
           total_found = 0
           raw_count = 0
 
+          # =========================================================
           # 4. KAYNAKLARI TARA
-          print("🚀 Tarama işlemi başlatılıyor...\n" + "-" * 50)
+          # =========================================================
+
+          print(
+              "🚀 Tarama işlemi başlatılıyor...\n"
+              + "-" * 50
+          )
 
           for link in all_links:
+
               tag = ""
               raw_mode = False
 
               current_link = link
 
-              # all# varsa RAW MODU
+              # -----------------------------------------------------
+              # all# KONTROLÜ
+              # -----------------------------------------------------
+
               if current_link.lower().startswith("all#"):
+
                   raw_mode = True
+
                   current_link = current_link[4:]
 
+              # -----------------------------------------------------
+              # TAG / URL AYIRMA
+              #
+              # Normal kaynaklarda mevcut sistem korunuyor.
+              # all# kaynaklarında tag uygulanmıyor.
+              # -----------------------------------------------------
+
               if "#http" in current_link.lower():
+
                   parts = current_link.split("#", 1)
+
                   tag = parts[0].strip()
                   url = parts[1].strip()
+
               else:
+
                   url = current_link
 
               if not url.startswith("http"):
+                  print(
+                      f"⚠️ Geçersiz URL atlandı: {url[:80]}"
+                  )
                   continue
 
               try:
+
+                  # -------------------------------------------------
+                  # KAYNAĞI İNDİR
+                  # -------------------------------------------------
+
                   r = requests.get(
                       url,
                       headers=browser_headers,
-                      timeout=20
+                      timeout=30
                   )
 
+                  r.raise_for_status()
+
                   r.encoding = "utf-8"
+
                   lines = r.text.splitlines()
 
                   link_count = 0
 
-                  # İlk geçerli EXT M3U satırını al
+                  # -------------------------------------------------
+                  # EPG / EXT M3U BAŞLIĞI
+                  # -------------------------------------------------
+
                   if epg_line is None:
+
                       for l in lines:
+
                           if l.strip().upper().startswith("#EXTM3U"):
+
                               epg_line = l.strip()
                               break
 
-                  # =========================================================
-                  # RAW / ALL MODU
-                  # all# ile gelen listeye FİLTRE UYGULANMAZ.
-                  # #EXTINF VE URL SATIRI DEĞİŞTİRİLMEZ.
-                  # =========================================================
+                  # =================================================
+                  # ALL / RAW MODU
+                  #
+                  # BURADA KAYNAĞA DOKUNULMUYOR.
+                  #
+                  # Sadece #EXTM3U ana çıktıya ikinci kez eklenmesin
+                  # diye çıkarılıyor.
+                  #
+                  # #EXTINF
+                  # #EXTVLCOPT
+                  # #KODIPROP
+                  # #EXTGRP
+                  # URL
+                  # ve diğer satırlar korunuyor.
+                  # =================================================
+
                   if raw_mode:
 
-                      for idx, l in enumerate(lines):
-                          l = l.strip()
+                      raw_lines = []
 
-                          if l.startswith("#EXTINF"):
-                              url_line = (
-                                  lines[idx + 1].strip()
-                                  if idx + 1 < len(lines)
-                                  else ""
-                              )
+                      for l in lines:
 
-                              if url_line and not url_line.startswith("#"):
+                          stripped = l.strip()
 
-                                  # Kaynaktan gelen #EXTINF SATIRINA
-                                  # HİÇBİR DEĞİŞİKLİK YAPILMIYOR.
-                                  raw_content += f"{l}\n{url_line}\n"
+                          # Ana çıktıda tek bir EXT M3U başlığı olacak
+                          if stripped.upper().startswith("#EXTM3U"):
+                              continue
 
-                                  raw_count += 1
-                                  link_count += 1
+                          # Kaynak satırını olduğu gibi koru
+                          raw_lines.append(l.rstrip())
+
+                          # Sadece istatistik için kanal say
+                          if stripped.startswith("#EXTINF"):
+
+                              raw_count += 1
+                              link_count += 1
+
+                      if raw_lines:
+
+                          raw_content += (
+                              "\n".join(raw_lines)
+                              + "\n"
+                          )
 
                       print(
                           f"✅ [RAW/ALL] {url[:50]}... -> "
-                          f"{link_count} kanal eksiksiz alındı."
+                          f"{link_count} kanal alındı. "
+                          f"Kaynak olduğu gibi korundu."
                       )
 
                       continue
 
-                  # =========================================================
-                  # FİLTRE MODU
-                  # Mevcut sistem aynen korunuyor.
-                  # =========================================================
+                  # =================================================
+                  # NORMAL FİLTRE MODU
+                  #
+                  # BURASI ESKİ MANTIKLA ÇALIŞIYOR.
+                  # =================================================
+
                   for idx, line in enumerate(lines):
 
                       line = line.strip()
 
                       if line.startswith("#EXTINF"):
 
-                          # Virgülden sonraki kanal ismini al
+                          # Virgülden sonraki kanal ismi
                           display_name = ""
 
                           if "," in line:
-                              display_name = line.split(",", 1)[1].strip()
 
+                              display_name = (
+                                  line.split(",", 1)[1].strip()
+                              )
+
+                          # Mevcut sistem:
+                          # EXTINF'den sonraki satırı URL olarak al
                           url_line = (
                               lines[idx + 1].strip()
                               if idx + 1 < len(lines)
                               else ""
                           )
 
-                          if url_line and not url_line.startswith("#"):
+                          if (
+                              url_line
+                              and not url_line.startswith("#")
+                          ):
 
                               for (kw, cat) in ordered_keywords:
 
-                                  if keyword_match(display_name, kw):
+                                  if keyword_match(
+                                      display_name,
+                                      kw
+                                  ):
 
+                                      # group-title / tvg-group /
+                                      # tvg-name temizliği
                                       clean = re.sub(
                                           r'(group-title|tvg-group|tvg-name)="[^"]*"',
                                           '',
                                           line
                                       )
 
+                                      # Normal kaynaklarda tag
+                                      # sistemi korunuyor
                                       if tag and "," in clean:
-                                          base_inf, ch_name = clean.rsplit(",", 1)
-                                          clean = (
-                                              f"{base_inf},"
-                                              f"{ch_name.strip()} ({tag})"
+
+                                          base_inf, ch_name = (
+                                              clean.rsplit(",", 1)
                                           )
 
+                                          clean = (
+                                              f"{base_inf},"
+                                              f"{ch_name.strip()} "
+                                              f"({tag})"
+                                          )
+
+                                      # Kategori ekle
                                       final_inf = clean.replace(
                                           "#EXTINF:",
                                           f'#EXTINF: group-title="{cat}"',
                                           1
                                       )
 
-                                      keyword_buckets[(kw, cat)] += (
+                                      keyword_buckets[
+                                          (kw, cat)
+                                      ] += (
                                           f"{final_inf}\n"
                                           f"{url_line}\n"
                                       )
@@ -211,6 +366,8 @@ jobs:
                                       link_count += 1
                                       total_found += 1
 
+                                      # Bir kanal bir keyword'e
+                                      # eşleşince diğerlerine bakma
                                       break
 
                   print(
@@ -219,26 +376,66 @@ jobs:
                       f"(Etiket: {tag if tag else 'Yok'})"
                   )
 
-              except Exception as e:
+              except requests.exceptions.Timeout:
+
                   print(
-                      f"❌ HATA: {url[:50]}... bağlantı sağlanamadı "
-                      f"veya liste bozuk. Hata: {e}"
+                      f"❌ ZAMAN AŞIMI: "
+                      f"{url[:80]}..."
                   )
 
-          # 5. BİRLEŞTİR VE GÜNCELLE
+              except requests.exceptions.RequestException as e:
+
+                  print(
+                      f"❌ BAĞLANTI HATASI: "
+                      f"{url[:80]}... "
+                      f"Hata: {e}"
+                  )
+
+              except Exception as e:
+
+                  print(
+                      f"❌ HATA: "
+                      f"{url[:80]}... "
+                      f"Hata: {e}"
+                  )
+
+          # =========================================================
+          # 5. SON LİSTEYİ OLUŞTUR
+          # =========================================================
           #
-          # Önce all# kaynaklarının olduğu gibi gelen tam listesi,
-          # ardından filter.txt sırasındaki normal kaynaklar ekleniyor.
+          # ÖNCE:
+          #   all# kaynakları
+          #
+          # SONRA:
+          #   filter.txt sırasına göre normal kaynaklar
+          #
+          # =========================================================
 
           final_body = raw_content
 
           for item in ordered_keywords:
+
               final_body += keyword_buckets[item]
 
-          final_output = (
-              (epg_line + "\n" if epg_line else "#EXTM3U\n")
-              + final_body
-          )
+          # EXT M3U başlığı
+          if epg_line:
+
+              final_output = (
+                  epg_line
+                  + "\n"
+                  + final_body
+              )
+
+          else:
+
+              final_output = (
+                  "#EXTM3U\n"
+                  + final_body
+              )
+
+          # =========================================================
+          # 6. GIST'E YAZ
+          # =========================================================
 
           upd = requests.patch(
               gist_api,
@@ -249,21 +446,45 @@ jobs:
                           "content": final_output
                       }
                   }
-              }
+              },
+              timeout=30
           )
 
           if upd.status_code == 200:
-              print("\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨")
-              print(f"📦 ALL/RAW Ham Liste: {raw_count} kanal")
-              print(f"🎯 Filtrelenen: {total_found} kanal")
+
+              print(
+                  "\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨"
+              )
+
+              print(
+                  f"📦 ALL/RAW Liste: {raw_count} kanal"
+              )
+
+              print(
+                  f"🎯 Filtrelenen: {total_found} kanal"
+              )
+
               print(
                   f"📊 Toplam Çıktı: "
-                  f"{raw_count + total_found} kanal Gist'e yazıldı."
+                  f"{raw_count + total_found} kanal"
               )
-          else:
+
               print(
-                  f"\n❌ Gist Güncelleme Hatası! "
-                  f"Kod: {upd.status_code}"
+                  "📄 favoritv Gist dosyası başarıyla güncellendi."
+              )
+
+          else:
+
+              print(
+                  "\n❌ Gist Güncelleme Hatası!"
+              )
+
+              print(
+                  f"HTTP Kod: {upd.status_code}"
+              )
+
+              print(
+                  f"Yanıt: {upd.text[:500]}"
               )
 
           PYCODE
