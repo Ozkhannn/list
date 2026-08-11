@@ -108,7 +108,7 @@ jobs:
                               epg_line = l.strip()
                               break
 
-                  # RAW MODU (Tamamen Orijinal)
+                  # RAW MODU (Düzeltildi: Ana listenin orijinal içeriğini hiç bozmaz)
                   if raw_mode:
                       for idx, l in enumerate(lines):
                           l = l.strip()
@@ -116,6 +116,7 @@ jobs:
                               raw_count += 1
                               link_count += 1
                               
+                              # Sadece eğer etiket (tag) varsa kanal isminin sonuna ekler, satırın kalan yapısına dokunmaz
                               if tag and "," in l:
                                   base_inf, ch_name = l.rsplit(",", 1)
                                   l = f"{base_inf},{ch_name.strip()} ({tag})"
@@ -157,18 +158,11 @@ jobs:
               except Exception as e:
                   print(f"❌ HATA: {url[:50]}... bağlantı sağlanamadı veya liste bozuk. Hata: {e}")
 
-          # 5. BİRLEŞTİR VE GÜNCELLE (Düzeltildi)
+          # 5. BİRLEŞTİR VE GÜNCELLE (Tamamen Orijinal Sıralama Korundu)
           print("-"*50)
-          
-          # Eğer bir RAW (ana liste) linki işlendiyse, SADECE o içeriği almasını sağlıyoruz.
-          if raw_content:
-              final_body = raw_content
-              print("ℹ️ Ana liste (RAW) bulundu. Sadece ana listenin içeriği aktarılıyor.")
-          else:
-              final_body = ""
-              for item in ordered_keywords:
-                  final_body += keyword_buckets[item]
-              print("ℹ️ Ana liste bulunamadı. Filtrelenen kanallar aktarılıyor.")
+          final_body = raw_content
+          for item in ordered_keywords:
+              final_body += keyword_buckets[item]
 
           final_output = (epg_line + "\n" if epg_line else "#EXTM3U\n") + final_body
           
@@ -176,10 +170,11 @@ jobs:
           
           if upd.status_code == 200:
               print(f"\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨")
-              if raw_content:
-                  print(f"📦 Ham Liste: {raw_count} kanal Gist'e olduğu gibi yazıldı.")
-              else:
-                  print(f"🎯 Filtrelenen: {total_found} kanal Gist'e yazıldı.")
+              print(f"📦 Ham Liste: {raw_count} kanal")
+              print(f"🎯 Filtrelenen: {total_found} kanal")
+              print(f"📊 Toplam Çıktı: {raw_count + total_found} kanal Gist'e yazıldı.")
           else:
               print(f"\n❌ Gist Güncelleme Hatası! Kod: {upd.status_code}")
-          PYCODE
+          PYCODE```
+
+Bu kodu test ettikten sonra Gist çıktınızda **hem ana listenizin eksiksiz durduğunu hem de altına diğer filtre kanallarının eklendiğini** görebilirsiniz. Eğer `all#` linkinizde özel bir etiket takısı (`#http` kullanarak) atadıysanız ve bu takının da eklenmesini istemiyorsanız, bunu belirtmeniz durumunda o kısmı da tamamen devre dışı bırakabilirim.
