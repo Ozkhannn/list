@@ -1,4 +1,5 @@
-name: Günlük IPTV Güncelleme 1.0 (favoritv)
+
+name: Günlük IPTV Güncelleme 1.1 (favoritv)
 
 on:
   schedule:
@@ -30,9 +31,14 @@ jobs:
           import os
           import requests
           import re
+          import sys
 
           gist_id = os.environ.get("GIST_ID")
           github_token = os.environ.get("GITHUB_TOKEN")
+
+          if not gist_id or not github_token:
+              print("❌ GIST_ID veya GITHUB_TOKEN eksik!")
+              sys.exit(1)
 
           headers = {
               "Authorization": f"token {github_token}"
@@ -40,7 +46,6 @@ jobs:
 
           gist_api = f"https://api.github.com/gists/{gist_id}"
 
-          # Sitelerin bot engellemesini azaltmak için tarayıcı başlığı
           browser_headers = {
               "User-Agent": (
                   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -61,17 +66,12 @@ jobs:
               )
 
               if resp.status_code != 200:
-                  print(
-                      f"❌ Gist okunamadı! "
-                      f"HTTP kodu: {resp.status_code}"
-                  )
-                  exit(1)
+                  print(f"❌ Gist okunamadı! HTTP: {resp.status_code}")
+                  sys.exit(1)
 
               gist_data = resp.json()
 
-              links_content = (
-                  gist_data["files"]["links"]["content"]
-              )
+              links_content = gist_data["files"]["links"]["content"]
 
               all_links = [
                   l.strip()
@@ -80,16 +80,12 @@ jobs:
               ]
 
               print(
-                  f"🔍 Toplam {len(all_links)} kaynak bağlantısı "
-                  f"Gist üzerinden alındı.\n"
+                  f"🔍 Toplam {len(all_links)} kaynak bağlantısı alındı.\n"
               )
 
           except Exception as e:
-              print(
-                  "❌ Hata: Gist üzerindeki 'links' dosyasına "
-                  f"ulaşılamadı! Hata: {e}"
-              )
-              exit(1)
+              print(f"❌ Gist okuma hatası: {e}")
+              sys.exit(1)
 
           # =========================================================
           # 2. FILTER.TXT OKU
@@ -109,11 +105,9 @@ jobs:
                       continue
 
                   if line.startswith("[") and line.endswith("]"):
-
                       current_cat = line[1:-1]
 
                   else:
-
                       keywords = [
                           x.strip()
                           for x in line.split(",")
@@ -139,10 +133,8 @@ jobs:
 
           epg_line = None
 
-          # all# kaynaklarının TAM içeriği
           raw_content = ""
 
-          # Normal kaynakların filtrelenmiş içerikleri
           keyword_buckets = {
               item: ""
               for item in ordered_keywords
@@ -168,20 +160,15 @@ jobs:
               current_link = link
 
               # -----------------------------------------------------
-              # all# KONTROLÜ
+              # ALL / RAW KONTROLÜ
               # -----------------------------------------------------
 
               if current_link.lower().startswith("all#"):
-
                   raw_mode = True
-
                   current_link = current_link[4:]
 
               # -----------------------------------------------------
-              # TAG / URL AYIRMA
-              #
-              # Normal kaynaklarda mevcut sistem korunuyor.
-              # all# kaynaklarında tag uygulanmıyor.
+              # GROUP TITLE / URL AYIRMA
               # -----------------------------------------------------
 
               if "#http" in current_link.lower():
@@ -192,13 +179,10 @@ jobs:
                   url = parts[1].strip()
 
               else:
-
                   url = current_link
 
               if not url.startswith("http"):
-                  print(
-                      f"⚠️ Geçersiz URL atlandı: {url[:80]}"
-                  )
+                  print(f"⚠️ Geçersiz URL atlandı: {url[:80]}")
                   continue
 
               try:
@@ -230,24 +214,11 @@ jobs:
                       for l in lines:
 
                           if l.strip().upper().startswith("#EXTM3U"):
-
                               epg_line = l.strip()
                               break
 
                   # =================================================
                   # ALL / RAW MODU
-                  #
-                  # BURADA KAYNAĞA DOKUNULMUYOR.
-                  #
-                  # Sadece #EXTM3U ana çıktıya ikinci kez eklenmesin
-                  # diye çıkarılıyor.
-                  #
-                  # #EXTINF
-                  # #EXTVLCOPT
-                  # #KODIPROP
-                  # #EXTGRP
-                  # URL
-                  # ve diğer satırlar korunuyor.
                   # =================================================
 
                   if raw_mode:
@@ -258,21 +229,16 @@ jobs:
 
                           stripped = l.strip()
 
-                          # Ana çıktıda tek bir EXT M3U başlığı olacak
                           if stripped.upper().startswith("#EXTM3U"):
                               continue
 
-                          # Kaynak satırını olduğu gibi koru
                           raw_lines.append(l.rstrip())
 
-                          # Sadece istatistik için kanal say
                           if stripped.startswith("#EXTINF"):
-
                               raw_count += 1
                               link_count += 1
 
                       if raw_lines:
-
                           raw_content += (
                               "\n".join(raw_lines)
                               + "\n"
@@ -280,16 +246,13 @@ jobs:
 
                       print(
                           f"✅ [RAW/ALL] {url[:50]}... -> "
-                          f"{link_count} kanal alındı. "
-                          f"Kaynak olduğu gibi korundu."
+                          f"{link_count} kanal alındı."
                       )
 
                       continue
 
                   # =================================================
                   # NORMAL FİLTRE MODU
-                  #
-                  # BURASI ESKİ MANTIKLA ÇALIŞIYOR.
                   # =================================================
 
                   for idx, line in enumerate(lines):
@@ -298,17 +261,13 @@ jobs:
 
                       if line.startswith("#EXTINF"):
 
-                          # Virgülden sonraki kanal ismi
                           display_name = ""
 
                           if "," in line:
-
                               display_name = (
                                   line.split(",", 1)[1].strip()
                               )
 
-                          # Mevcut sistem:
-                          # EXTINF'den sonraki satırı URL olarak al
                           url_line = (
                               lines[idx + 1].strip()
                               if idx + 1 < len(lines)
@@ -322,37 +281,23 @@ jobs:
 
                               for (kw, cat) in ordered_keywords:
 
-                                  if keyword_match(
-                                      display_name,
-                                      kw
-                                  ):
+                                  if keyword_match(display_name, kw):
 
-                                      # group-title / tvg-group /
-                                      # tvg-name temizliği
+                                      # group-title temizliği
                                       clean = re.sub(
                                           r'(group-title|tvg-group|tvg-name)="[^"]*"',
                                           '',
                                           line
                                       )
 
-                                      # Normal kaynaklarda tag
-                                      # sistemi korunuyor
-                                      if tag and "," in clean:
-
-                                          base_inf, ch_name = (
-                                              clean.rsplit(",", 1)
-                                          )
-
-                                          clean = (
-                                              f"{base_inf},"
-                                              f"{ch_name.strip()} "
-                                              f"({tag})"
-                                          )
+                                      # Gist links başındaki isim
+                                      # yeni group-title değeridir.
+                                      group_name = tag if tag else cat
 
                                       # Kategori ekle
                                       final_inf = clean.replace(
                                           "#EXTINF:",
-                                          f'#EXTINF: group-title="{cat}"',
+                                          f'#EXTINF: group-title="{group_name}"',
                                           1
                                       )
 
@@ -366,72 +311,36 @@ jobs:
                                       link_count += 1
                                       total_found += 1
 
-                                      # Bir kanal bir keyword'e
-                                      # eşleşince diğerlerine bakma
                                       break
 
                   print(
                       f"✅ [FİLTRE] {url[:50]}... -> "
                       f"{link_count} kanal eşleşti. "
-                      f"(Etiket: {tag if tag else 'Yok'})"
+                      f"(Group: {tag if tag else 'Filter kategorisi'})"
                   )
 
               except requests.exceptions.Timeout:
-
-                  print(
-                      f"❌ ZAMAN AŞIMI: "
-                      f"{url[:80]}..."
-                  )
+                  print(f"❌ ZAMAN AŞIMI: {url[:80]}...")
 
               except requests.exceptions.RequestException as e:
-
-                  print(
-                      f"❌ BAĞLANTI HATASI: "
-                      f"{url[:80]}... "
-                      f"Hata: {e}"
-                  )
+                  print(f"❌ BAĞLANTI HATASI: {url[:80]}... Hata: {e}")
 
               except Exception as e:
-
-                  print(
-                      f"❌ HATA: "
-                      f"{url[:80]}... "
-                      f"Hata: {e}"
-                  )
+                  print(f"❌ HATA: {url[:80]}... Hata: {e}")
 
           # =========================================================
           # 5. SON LİSTEYİ OLUŞTUR
-          # =========================================================
-          #
-          # ÖNCE:
-          #   all# kaynakları
-          #
-          # SONRA:
-          #   filter.txt sırasına göre normal kaynaklar
-          #
           # =========================================================
 
           final_body = raw_content
 
           for item in ordered_keywords:
-
               final_body += keyword_buckets[item]
 
-          # EXT M3U başlığı
           if epg_line:
-
-              final_output = (
-                  epg_line
-                  + "\n"
-                  + final_body
-              )
-
+              final_output = epg_line + "\n" + final_body
           else:
-
-              final_output = (
-                  "#EXTM3U\n"
-                  + final_body
-              )
+              final_output = "#EXTM3U\n" + final_body
 
           # =========================================================
           # 6. GIST'E YAZ
@@ -452,39 +361,20 @@ jobs:
 
           if upd.status_code == 200:
 
-              print(
-                  "\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨"
-              )
+              print("\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨")
 
-              print(
-                  f"📦 ALL/RAW Liste: {raw_count} kanal"
-              )
+              print(f"📦 ALL/RAW Liste: {raw_count} kanal")
+              print(f"🎯 Filtrelenen: {total_found} kanal")
+              print(f"📊 Toplam Çıktı: {raw_count + total_found} kanal")
 
-              print(
-                  f"🎯 Filtrelenen: {total_found} kanal"
-              )
-
-              print(
-                  f"📊 Toplam Çıktı: "
-                  f"{raw_count + total_found} kanal"
-              )
-
-              print(
-                  "📄 favoritv Gist dosyası başarıyla güncellendi."
-              )
+              print("📄 favoritv Gist dosyası başarıyla güncellendi.")
 
           else:
 
-              print(
-                  "\n❌ Gist Güncelleme Hatası!"
-              )
+              print("\n❌ Gist Güncelleme Hatası!")
+              print(f"HTTP Kod: {upd.status_code}")
+              print(f"Yanıt: {upd.text[:500]}")
 
-              print(
-                  f"HTTP Kod: {upd.status_code}"
-              )
-
-              print(
-                  f"Yanıt: {upd.text[:500]}"
-              )
+              sys.exit(1)
 
           PYCODE
