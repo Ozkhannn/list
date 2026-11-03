@@ -1,5 +1,5 @@
 
-name: Günlük IPTV Güncelleme 1.1 (favoritv)
+name: Günlük IPTV Güncelleme 1.2 (favoritv)
 
 on:
   schedule:
@@ -108,6 +108,7 @@ jobs:
                       current_cat = line[1:-1]
 
                   else:
+
                       keywords = [
                           x.strip()
                           for x in line.split(",")
@@ -131,10 +132,40 @@ jobs:
                   )
               )
 
+          def set_group_title(line, group_name, normal_mode=False):
+
+              # Mevcut normal filtre temizliği korunuyor.
+              if normal_mode:
+                  line = re.sub(
+                      r'(group-title|tvg-group|tvg-name)="[^"]*"',
+                      '',
+                      line
+                  )
+              else:
+                  # FULL modunda diğer kanal bilgilerini koru.
+                  line = re.sub(
+                      r'\s+group-title="[^"]*"',
+                      '',
+                      line
+                  )
+
+              safe_group = group_name.replace('"', '\\"')
+
+              return line.replace(
+                  "#EXTINF:",
+                  f'#EXTINF: group-title="{safe_group}"',
+                  1
+              )
+
           epg_line = None
 
+          # RAW içerik
           raw_content = ""
 
+          # FULL içerik
+          full_content = ""
+
+          # Normal filtre içerikleri
           keyword_buckets = {
               item: ""
               for item in ordered_keywords
@@ -142,6 +173,7 @@ jobs:
 
           total_found = 0
           raw_count = 0
+          full_count = 0
 
           # =========================================================
           # 4. KAYNAKLARI TARA
@@ -156,16 +188,27 @@ jobs:
 
               tag = ""
               raw_mode = False
+              full_mode = False
 
               current_link = link
 
               # -----------------------------------------------------
-              # ALL / RAW KONTROLÜ
+              # ALL / RAW MODU
               # -----------------------------------------------------
 
               if current_link.lower().startswith("all#"):
+
                   raw_mode = True
                   current_link = current_link[4:]
+
+              # -----------------------------------------------------
+              # FULL / TÜM KANALLAR MODU
+              # -----------------------------------------------------
+
+              elif current_link.lower().startswith("full#"):
+
+                  full_mode = True
+                  current_link = current_link[5:]
 
               # -----------------------------------------------------
               # GROUP TITLE / URL AYIRMA
@@ -179,7 +222,14 @@ jobs:
                   url = parts[1].strip()
 
               else:
+
                   url = current_link
+
+              if full_mode and not tag:
+                  print(
+                      f"⚠️ FULL kaynağında grup adı eksik: {link[:80]}"
+                  )
+                  continue
 
               if not url.startswith("http"):
                   print(f"⚠️ Geçersiz URL atlandı: {url[:80]}")
@@ -214,11 +264,14 @@ jobs:
                       for l in lines:
 
                           if l.strip().upper().startswith("#EXTM3U"):
+
                               epg_line = l.strip()
                               break
 
                   # =================================================
                   # ALL / RAW MODU
+                  #
+                  # Kaynak içeriği korunur.
                   # =================================================
 
                   if raw_mode:
@@ -239,6 +292,7 @@ jobs:
                               link_count += 1
 
                       if raw_lines:
+
                           raw_content += (
                               "\n".join(raw_lines)
                               + "\n"
@@ -252,7 +306,70 @@ jobs:
                       continue
 
                   # =================================================
+                  # FULL MODU
+                  #
+                  # Filtre uygulanmaz.
+                  # Bütün EXTINF kanalları alınır.
+                  # group-title belirtilen isim yapılır.
+                  # =================================================
+
+                  if full_mode:
+
+                      full_lines = []
+
+                      for idx, line in enumerate(lines):
+
+                          line = line.strip()
+
+                          if not line.startswith("#EXTINF"):
+                              continue
+
+                          url_line = (
+                              lines[idx + 1].strip()
+                              if idx + 1 < len(lines)
+                              else ""
+                          )
+
+                          if (
+                              not url_line
+                              or url_line.startswith("#")
+                          ):
+                              continue
+
+                          final_inf = set_group_title(
+                              line,
+                              tag,
+                              normal_mode=False
+                          )
+
+                          full_lines.append(
+                              f"{final_inf}\n{url_line}"
+                          )
+
+                          full_count += 1
+                          link_count += 1
+
+                      if full_lines:
+
+                          full_content += (
+                              "\n".join(full_lines)
+                              + "\n"
+                          )
+
+                      print(
+                          f"✅ [FULL] {url[:50]}... -> "
+                          f"{link_count} kanal alındı. "
+                          f"(Group: {tag})"
+                      )
+
+                      continue
+
+                  # =================================================
                   # NORMAL FİLTRE MODU
+                  #
+                  # filter.txt sıralaması korunur.
+                  # Grup varsa Gist links kullanılır.
+                  # Grup yoksa filter.txt kategorisi kullanılır.
                   # =================================================
 
                   for idx, line in enumerate(lines):
@@ -264,6 +381,7 @@ jobs:
                           display_name = ""
 
                           if "," in line:
+
                               display_name = (
                                   line.split(",", 1)[1].strip()
                               )
@@ -281,24 +399,19 @@ jobs:
 
                               for (kw, cat) in ordered_keywords:
 
-                                  if keyword_match(display_name, kw):
+                                  if keyword_match(
+                                      display_name,
+                                      kw
+                                  ):
 
-                                      # group-title temizliği
-                                      clean = re.sub(
-                                          r'(group-title|tvg-group|tvg-name)="[^"]*"',
-                                          '',
-                                          line
-                                      )
-
-                                      # Gist links başındaki isim
-                                      # yeni group-title değeridir.
+                                      # Gist grup adı öncelikli.
+                                      # Grup yoksa filter.txt kategorisi.
                                       group_name = tag if tag else cat
 
-                                      # Kategori ekle
-                                      final_inf = clean.replace(
-                                          "#EXTINF:",
-                                          f'#EXTINF: group-title="{group_name}"',
-                                          1
+                                      final_inf = set_group_title(
+                                          line,
+                                          group_name,
+                                          normal_mode=True
                                       )
 
                                       keyword_buckets[
@@ -311,6 +424,7 @@ jobs:
                                       link_count += 1
                                       total_found += 1
 
+                                      # İlk eşleşmede dur.
                                       break
 
                   print(
@@ -320,27 +434,53 @@ jobs:
                   )
 
               except requests.exceptions.Timeout:
+
                   print(f"❌ ZAMAN AŞIMI: {url[:80]}...")
 
               except requests.exceptions.RequestException as e:
-                  print(f"❌ BAĞLANTI HATASI: {url[:80]}... Hata: {e}")
+
+                  print(
+                      f"❌ BAĞLANTI HATASI: {url[:80]}... "
+                      f"Hata: {e}"
+                  )
 
               except Exception as e:
-                  print(f"❌ HATA: {url[:80]}... Hata: {e}")
+
+                  print(
+                      f"❌ HATA: {url[:80]}... "
+                      f"Hata: {e}"
+                  )
 
           # =========================================================
           # 5. SON LİSTEYİ OLUŞTUR
+          #
+          # 1. ALL / RAW
+          # 2. FULL (Gist sırası)
+          # 3. NORMAL (filter.txt sırası)
           # =========================================================
 
           final_body = raw_content
 
+          final_body += full_content
+
           for item in ordered_keywords:
+
               final_body += keyword_buckets[item]
 
           if epg_line:
-              final_output = epg_line + "\n" + final_body
+
+              final_output = (
+                  epg_line
+                  + "\n"
+                  + final_body
+              )
+
           else:
-              final_output = "#EXTM3U\n" + final_body
+
+              final_output = (
+                  "#EXTM3U\n"
+                  + final_body
+              )
 
           # =========================================================
           # 6. GIST'E YAZ
@@ -363,11 +503,18 @@ jobs:
 
               print("\n✨ İŞLEM BAŞARIYLA TAMAMLANDI ✨")
 
-              print(f"📦 ALL/RAW Liste: {raw_count} kanal")
+              print(f"📦 ALL / RAW: {raw_count} kanal")
+              print(f"📂 FULL: {full_count} kanal")
               print(f"🎯 Filtrelenen: {total_found} kanal")
-              print(f"📊 Toplam Çıktı: {raw_count + total_found} kanal")
 
-              print("📄 favoritv Gist dosyası başarıyla güncellendi.")
+              print(
+                  f"📊 Toplam Çıktı: "
+                  f"{raw_count + full_count + total_found} kanal"
+              )
+
+              print(
+                  "📄 favoritv Gist dosyası başarıyla güncellendi."
+              )
 
           else:
 
